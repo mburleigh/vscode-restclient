@@ -1,5 +1,3 @@
-"use strict";
-
 import * as url from 'url';
 import { MarkdownString, SnippetString, TextDocument } from 'vscode';
 import * as Constants from '../common/constants';
@@ -7,11 +5,11 @@ import { ElementType, HttpElement } from '../models/httpElement';
 import { EnvironmentVariableProvider } from './httpVariableProviders/environmentVariableProvider';
 import { FileVariableProvider } from './httpVariableProviders/fileVariableProvider';
 import { RequestVariableProvider } from './httpVariableProviders/requestVariableProvider';
-import { PersistUtility } from './persistUtility';
+import { UserDataManager } from './userDataManager';
 
 export class HttpElementFactory {
     public static async getHttpElements(document: TextDocument, line: string): Promise<HttpElement[]> {
-        let originalElements: HttpElement[] = [];
+        const originalElements: HttpElement[] = [];
 
         // add http methods
         originalElements.push(new HttpElement('GET', ElementType.Method));
@@ -83,7 +81,8 @@ export class HttpElementFactory {
 
         // add Basic, Digest Authentication snippet
         originalElements.push(new HttpElement("Basic Base64", ElementType.Authentication, '^\\s*Authorization\\s*\\:\\s*', "Base64 encoded username and password", new SnippetString(`Basic \${1:base64-user-password}`)));
-        originalElements.push(new HttpElement("Basic Raw Credential", ElementType.Authentication, '^\\s*Authorization\\s*\\:\\s*', "Raw username and password", new SnippetString(`Basic \${1:username} \${2:password}`)));
+        originalElements.push(new HttpElement("Basic Raw Credential (Colon Separated)", ElementType.Authentication, '^\\s*Authorization\\s*\\:\\s*', "Raw username and password", new SnippetString(`Basic \${1:username}:\${2:password}`)));
+        originalElements.push(new HttpElement("Basic Raw Credential (Space Separated)", ElementType.Authentication, '^\\s*Authorization\\s*\\:\\s*', "Raw username and password", new SnippetString(`Basic \${1:username} \${2:password}`)));
         originalElements.push(new HttpElement("Digest", ElementType.Authentication, '^\\s*Authorization\\s*\\:\\s*', "Raw username and password", new SnippetString(`Digest \${1:username} \${2:password}`)));
 
         // add global variables
@@ -106,6 +105,12 @@ export class HttpElementFactory {
             Constants.DateTimeVariableNameDescription,
             new SnippetString(`{{$\${name:${Constants.DateTimeVariableName.slice(1)}} \${1|rfc1123,iso8601|}}}`)));
         originalElements.push(new HttpElement(
+            Constants.LocalDateTimeVariableName,
+            ElementType.SystemVariable,
+            null,
+            Constants.LocalDateTimeVariableNameDescription,
+            new SnippetString(`{{$\${name:${Constants.LocalDateTimeVariableName.slice(1)}} \${1|rfc1123,iso8601|}}}`)));
+        originalElements.push(new HttpElement(
             Constants.RandomIntVariableName,
             ElementType.SystemVariable,
             null,
@@ -119,6 +124,13 @@ export class HttpElementFactory {
             new SnippetString(`{{$\${name:${Constants.ProcessEnvVariableName.slice(1)}} \${2:process environment variable name}}}`)
         ));
         originalElements.push(new HttpElement(
+            Constants.DotenvVariableName,
+            ElementType.SystemVariable,
+            null,
+            Constants.DotenvDescription,
+            new SnippetString(`{{$\${name:${Constants.DotenvVariableName.slice(1)}} \${2:.env variable name}}}`)
+        ));
+        originalElements.push(new HttpElement(
             Constants.AzureActiveDirectoryVariableName,
             ElementType.SystemVariable,
             null,
@@ -126,7 +138,7 @@ export class HttpElementFactory {
             new SnippetString(`{{$\${name:${Constants.AzureActiveDirectoryVariableName.slice(1)}}}}`)));
 
         // add environment custom variables
-        const environmentVariables = await EnvironmentVariableProvider.Instance.getAll(document);
+        const environmentVariables = await EnvironmentVariableProvider.Instance.getAll();
         for (const { name, value } of environmentVariables) {
             originalElements.push(
                 new HttpElement(
@@ -163,11 +175,14 @@ export class HttpElementFactory {
         }
 
         // add urls from history
-        let historyItems = await PersistUtility.loadRequests();
-        let distinctRequestUrls = Array.from(new Set(historyItems.map(item => item.url)));
+        const historyItems = await UserDataManager.getRequestHistory();
+        const distinctRequestUrls = new Set(historyItems.map(item => item.url));
         distinctRequestUrls.forEach(requestUrl => {
-            let protocol = url.parse(requestUrl).protocol;
-            let prefixLength = protocol.length + 2; // https: + //
+            const protocol = url.parse(requestUrl).protocol;
+            if (!protocol) {
+                return;
+            }
+            const prefixLength = protocol.length + 2; // https: + //
             originalElements.push(new HttpElement(`${requestUrl.substr(prefixLength)}`, ElementType.URL, '^\\s*(?:(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE)\\s+)https?\\:\\/{2}'));
         });
 

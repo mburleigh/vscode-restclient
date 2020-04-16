@@ -1,6 +1,3 @@
-'use strict';
-
-import { TextDocument } from 'vscode';
 import * as Constants from '../../common/constants';
 import { EnvironmentController } from '../../controllers/environmentController';
 import { RestClientSettings } from '../../models/configurationSettings';
@@ -14,11 +11,11 @@ export class EnvironmentVariableProvider implements HttpVariableProvider {
     private readonly _settings: RestClientSettings = RestClientSettings.Instance;
 
     public static get Instance(): EnvironmentVariableProvider {
-        if (!EnvironmentVariableProvider._instance) {
-            EnvironmentVariableProvider._instance = new EnvironmentVariableProvider();
+        if (!this._instance) {
+            this._instance = new EnvironmentVariableProvider();
         }
 
-        return EnvironmentVariableProvider._instance;
+        return this._instance;
     }
 
     private constructor() {
@@ -26,12 +23,12 @@ export class EnvironmentVariableProvider implements HttpVariableProvider {
 
     public readonly type: VariableType = VariableType.Environment;
 
-    public async has(document: TextDocument, name: string): Promise<boolean> {
+    public async has(name: string): Promise<boolean> {
         const variables = await this.getAvailableVariables();
         return name in variables;
     }
 
-    public async get(document: TextDocument, name: string): Promise<HttpVariable> {
+    public async get(name: string): Promise<HttpVariable> {
         const variables = await this.getAvailableVariables();
         if (!(name in variables)) {
             return { name, error: ResolveErrorMessage.EnvironmentVariableNotExist };
@@ -40,7 +37,7 @@ export class EnvironmentVariableProvider implements HttpVariableProvider {
         return { name, value: variables[name] };
     }
 
-    public async getAll(document: TextDocument): Promise<HttpVariable[]> {
+    public async getAll(): Promise<HttpVariable[]> {
         const variables = await this.getAvailableVariables();
         return Object.keys(variables).map(key => ({ name: key, value: variables[key]}));
     }
@@ -54,23 +51,18 @@ export class EnvironmentVariableProvider implements HttpVariableProvider {
         const currentEnvironmentVariables = variables[environmentName];
         const sharedEnvironmentVariables = variables[EnvironmentController.sharedEnvironmentName];
         this.mapEnvironmentVariables(currentEnvironmentVariables, sharedEnvironmentVariables);
-        return Object.assign({}, sharedEnvironmentVariables, currentEnvironmentVariables);
+        return {...sharedEnvironmentVariables, ...currentEnvironmentVariables};
     }
 
-    private mapEnvironmentVariables(current: any, shared: any) {
+    private mapEnvironmentVariables(current: { [key: string]: string }, shared: { [key: string]: string }) {
         for (const [key, value] of Object.entries(current)) {
-            if (typeof(value) !== "string") {
-                continue;
-            }
             const variableRegex = /\{{2}\$shared (.+?)\}{2}/;
             const match = variableRegex.exec(value);
             if (!match) {
                 continue;
             }
             const referenceKey = match[1].trim();
-            if (typeof(shared[referenceKey]) === "string") {
-                current[key] = shared[referenceKey];
-            }
+            current[key] = shared[referenceKey];
         }
     }
 }

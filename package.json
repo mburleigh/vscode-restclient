@@ -2,7 +2,7 @@
   "name": "rest-client",
   "displayName": "REST Client",
   "description": "REST Client for Visual Studio Code",
-  "version": "0.22.2",
+  "version": "0.23.2",
   "publisher": "humao",
   "author": {
     "name": "Huachao Mao",
@@ -24,7 +24,7 @@
     "url": "https://github.com/Huachao/vscode-restclient.git"
   },
   "engines": {
-    "vscode": "^1.30.0"
+    "vscode": "^1.38.0"
   },
   "categories": [
     "Other",
@@ -47,6 +47,13 @@
     "onCommand:rest-client.copy-response-body",
     "onCommand:rest-client.switch-environment",
     "onCommand:rest-client.clear-aad-token-cache",
+    "onCommand:rest-client.cancel-request",
+    "onCommand:rest-client.rerun-last-request",
+    "onCommand:rest-client.generate-codesnippet",
+    "onCommand:rest-client.copy-codesnippet",
+    "onCommand:rest-client.copy-request-as-curl",
+    "onCommand:rest-client.fold-response",
+    "onCommand:rest-client.unfold-response",
     "onLanguage:http"
   ],
   "main": "./dist/extension",
@@ -197,7 +204,7 @@
         },
         {
           "command": "rest-client.copy-codesnippet",
-          "when": "httpResponsePreviewFocus"
+          "when": "codeSnippetPreviewFocus"
         }
       ],
       "editor/title": [
@@ -329,8 +336,7 @@
         "rest-client.defaultHeaders": {
           "type": "object",
           "default": {
-            "User-Agent": "vscode-restclient",
-            "Accept-Encoding": "gzip"
+            "User-Agent": "vscode-restclient"
           },
           "scope": "resource",
           "description": "If particular headers are omitted in request headers, these will be added as headers for each request."
@@ -432,6 +438,13 @@
           "type": "object",
           "default": {},
           "scope": "resource",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ]
+          },
           "markdownDescription": "Sets the custom mapping of mime type and file extension of saved response body (e.g., `{\"application/atom+xml\": \"xml\"}`)"
         },
         "rest-client.previewResponseInUntitledDocument": {
@@ -618,13 +631,14 @@
   },
   "devDependencies": {
     "@types/fs-extra": "^5.0.4",
+    "@types/got": "^9.6.8",
     "@types/mocha": "^2.2.32",
     "@types/node": "^10.14.0",
-    "@types/vscode": "^1.30.0",
+    "@types/vscode": "^1.38.0",
     "mocha": "^3.2.0",
     "ts-loader": "^5.3.2",
     "tslint": "^5.10.0",
-    "typescript": "^3.2.2",
+    "typescript": "^3.7.3",
     "webpack": "^4.19.1",
     "webpack-cli": "^3.1.0"
   },
@@ -633,21 +647,22 @@
     "applicationinsights": "^1.0.5",
     "code-highlight-linenums": "^0.2.1",
     "combined-stream": "^1.0.5",
+    "dayjs": "^1.8.20",
+    "dotenv": "^8.2.0",
     "encodeurl": "^1.0.1",
     "filesize": "^3.3.0",
     "fs-extra": "^5.0.0",
+    "got": "^9.6.0",
     "highlight.js": "^9.6.0",
     "http-proxy-agent": "^2.1.0",
-    "https-proxy-agent": "^2.2.1",
+    "https-proxy-agent": "^2.2.3",
     "httpsnippet": "^1.19.1",
     "iconv-lite": "^0.4.15",
     "jsonc-parser": "^2.0.2",
     "jsonpath-plus": "^0.20.1",
     "mime-types": "^2.1.14",
-    "moment": "^2.20.1",
     "pretty-data": "^0.40.0",
-    "request": "^2.81.0",
-    "tmp": "^0.0.31",
+    "tough-cookie": "^3.0.1",
     "tough-cookie-file-store-bugfix": "Huachao/tough-cookie-file-store-bugfix",
     "uuid": "^3.3.2",
     "xmldom": "^0.1.27",

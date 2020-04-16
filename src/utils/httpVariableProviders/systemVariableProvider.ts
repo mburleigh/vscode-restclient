@@ -1,7 +1,9 @@
-'use strict';
-
 import * as adal from 'adal-node';
-import { DurationInputArg2, Moment, utc } from 'moment';
+import dayjs, { Dayjs, OpUnitType } from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import * as dotenv from 'dotenv';
+import * as fs from 'fs-extra';
+import * as path from 'path';
 import { Clipboard, commands, env, QuickPickItem, QuickPickOptions, TextDocument, Uri, window } from 'vscode';
 import * as Constants from '../../common/constants';
 import { HttpRequest } from '../../models/httpRequest';
@@ -14,8 +16,10 @@ import { HttpVariable, HttpVariableContext, HttpVariableProvider } from './httpV
 
 const uuidv4 = require('uuid/v4');
 
+dayjs.extend(utc);
+
 type SystemVariableValue = Pick<HttpVariable, Exclude<keyof HttpVariable, 'name'>>;
-type ResolveSystemVariableFunc = (name: string, context: HttpVariableContext) => Promise<SystemVariableValue>;
+type ResolveSystemVariableFunc = (name: string, document: TextDocument, context: HttpVariableContext) => Promise<SystemVariableValue>;
 
 export class SystemVariableProvider implements HttpVariableProvider {
 
@@ -23,52 +27,57 @@ export class SystemVariableProvider implements HttpVariableProvider {
     private readonly resolveFuncs: Map<string, ResolveSystemVariableFunc> = new Map<string, ResolveSystemVariableFunc>();
     private readonly timestampRegex: RegExp = new RegExp(`\\${Constants.TimeStampVariableName}(?:\\s(\\-?\\d+)\\s(y|Q|M|w|d|h|m|s|ms))?`);
     private readonly datetimeRegex: RegExp = new RegExp(`\\${Constants.DateTimeVariableName}\\s(rfc1123|iso8601|\'.+\'|\".+\")(?:\\s(\\-?\\d+)\\s(y|Q|M|w|d|h|m|s|ms))?`);
+    private readonly localDatetimeRegex: RegExp = new RegExp(`\\${Constants.LocalDateTimeVariableName}\\s(rfc1123|iso8601|\'.+\'|\".+\")(?:\\s(\\-?\\d+)\\s(y|Q|M|w|d|h|m|s|ms))?`);
     private readonly randomIntegerRegex: RegExp = new RegExp(`\\${Constants.RandomIntVariableName}\\s(\\-?\\d+)\\s(\\-?\\d+)`);
     private readonly processEnvRegex: RegExp = new RegExp(`\\${Constants.ProcessEnvVariableName}\\s(\\%)?(\\w+)`);
+
+    private readonly dotenvRegex: RegExp = new RegExp(`\\${Constants.DotenvVariableName}\\s(\\%)?([\\w-.]+)`);
 
     private readonly requestUrlRegex: RegExp = /^(?:[^\s]+\s+)([^:]*:\/\/\/?[^/\s]*\/?)/;
 
     private readonly aadRegex: RegExp = new RegExp(`\\s*\\${Constants.AzureActiveDirectoryVariableName}(\\s+(${Constants.AzureActiveDirectoryForceNewOption}))?(\\s+(ppe|public|cn|de|us))?(\\s+([^\\.]+\\.[^\\}\\s]+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))?(\\s+aud:([^\\.]+\\.[^\\}\\s]+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))?\\s*`);
 
-    private readonly innerSettingsEnvironmentVariableProvider: HttpVariableProvider =  EnvironmentVariableProvider.Instance;
+    private readonly innerSettingsEnvironmentVariableProvider: EnvironmentVariableProvider =  EnvironmentVariableProvider.Instance;
     private static _instance: SystemVariableProvider;
 
     public static get Instance(): SystemVariableProvider {
-        if (!SystemVariableProvider._instance) {
-            SystemVariableProvider._instance = new SystemVariableProvider();
+        if (!this._instance) {
+            this._instance = new SystemVariableProvider();
         }
 
-        return SystemVariableProvider._instance;
+        return this._instance;
     }
 
     private constructor() {
         this.clipboard = env.clipboard;
         this.registerTimestampVariable();
         this.registerDateTimeVariable();
+        this.registerLocalDateTimeVariable();
         this.registerGuidVariable();
         this.registerRandomIntVariable();
         this.registerProcessEnvVariable();
+        this.registerDotenvVariable();
         this.registerAadTokenVariable();
     }
 
     public readonly type: VariableType = VariableType.System;
 
-    public async has(document: TextDocument, name: string, context: HttpVariableContext): Promise<boolean> {
+    public async has(name: string, document: TextDocument): Promise<boolean> {
         const [variableName] = name.split(' ').filter(Boolean);
         return this.resolveFuncs.has(variableName);
     }
 
-    public async get(document: TextDocument, name: string, context: HttpVariableContext): Promise<HttpVariable> {
+    public async get(name: string, document: TextDocument, context: HttpVariableContext): Promise<HttpVariable> {
         const [variableName] = name.split(' ').filter(Boolean);
         if (!this.resolveFuncs.has(variableName)) {
             return { name: variableName, error: ResolveErrorMessage.SystemVariableNotExist };
         }
 
-        const result = await this.resolveFuncs.get(variableName)(name, context);
+        const result = await this.resolveFuncs.get(variableName)!(name, document, context);
         return { name: variableName, ...result };
     }
 
-    public async getAll(document: TextDocument, context: HttpVariableContext): Promise<HttpVariable[]> {
+    public async getAll(document: undefined, context: HttpVariableContext): Promise<HttpVariable[]> {
         return [...this.resolveFuncs.keys()].map(name => ({ name }));
     }
 
@@ -78,8 +87,8 @@ export class SystemVariableProvider implements HttpVariableProvider {
             if (groups !== null && groups.length === 3) {
                 const [, offset, option] = groups;
                 const ts = offset && option
-                    ? utc().add(offset, option as DurationInputArg2).unix()
-                    : utc().unix();
+                    ? dayjs.utc().add(+offset, option as OpUnitType).unix()
+                    : dayjs.utc().unix();
                 return { value: ts.toString() };
             }
 
@@ -92,15 +101,15 @@ export class SystemVariableProvider implements HttpVariableProvider {
             const groups = this.datetimeRegex.exec(name);
             if (groups !== null && groups.length === 4) {
                 const [, type, offset, option] = groups;
-                let date: Moment;
+                let date: Dayjs;
                 if (offset && option) {
-                    date = utc().add(offset, option as DurationInputArg2);
+                    date = dayjs.utc().add(+offset, option as OpUnitType);
                 } else {
-                    date = utc();
+                    date = dayjs.utc();
                 }
 
                 if (type === 'rfc1123') {
-                    return { value: date.toString() };
+                    return { value: date.toDate().toUTCString() };
                 } else if (type === 'iso8601') {
                     return { value: date.toISOString() };
                 } else {
@@ -112,8 +121,31 @@ export class SystemVariableProvider implements HttpVariableProvider {
         });
     }
 
+    private registerLocalDateTimeVariable() {
+        this.resolveFuncs.set(Constants.LocalDateTimeVariableName, async name => {
+            const groups = this.localDatetimeRegex.exec(name);
+            if (groups !== null && groups.length === 4) {
+                const [, type, offset, option] = groups;
+                let date = dayjs.utc().local();
+                if (offset && option) {
+                    date = date.add(+offset, option as OpUnitType);
+                }
+
+                if (type === 'rfc1123') {
+                    return { value: date.locale('en').format('ddd, DD MMM YYYY HH:mm:ss ZZ') };
+                } else if (type === 'iso8601') {
+                    return { value: date.toISOString() };
+                } else {
+                    return { value: date.format(type.slice(1, type.length - 1)) };
+                }
+            }
+
+            return { warning: ResolveWarningMessage.IncorrectLocalDateTimeVariableFormat };
+        });
+    }
+
     private registerGuidVariable() {
-        this.resolveFuncs.set(Constants.GuidVariableName, async name => ({ value: uuidv4() }));
+        this.resolveFuncs.set(Constants.GuidVariableName, async () => ({ value: uuidv4() }));
     }
 
     private registerRandomIntVariable() {
@@ -121,8 +153,8 @@ export class SystemVariableProvider implements HttpVariableProvider {
             const groups = this.randomIntegerRegex.exec(name);
             if (groups !== null && groups.length === 3) {
                 const [, min, max] = groups;
-                let minNum = Number(min);
-                let maxNum = Number(max);
+                const minNum = Number(min);
+                const maxNum = Number(max);
                 if (minNum < maxNum) {
                     return { value: (Math.floor(Math.random() * (maxNum - minNum)) + minNum).toString() };
                 }
@@ -131,22 +163,6 @@ export class SystemVariableProvider implements HttpVariableProvider {
             return { warning: ResolveWarningMessage.IncorrectRandomIntegerVariableFormat };
         });
     }
-
-    private async resolveSettingsEnvironmentVariable (name: string) {
-        let document = null;
-        let context = null;
-        if (await this.innerSettingsEnvironmentVariableProvider.has(document, name, context)) {
-            const { value, error, warning } =  await this.innerSettingsEnvironmentVariableProvider.get(document, name, context);
-            if (!error && !warning) {
-                return value.toString();
-            } else {
-                return name;
-            }
-        } else {
-            return name;
-        }
-    }
-
     private registerProcessEnvVariable() {
         this.resolveFuncs.set(Constants.ProcessEnvVariableName, async name => {
             const groups = this.processEnvRegex.exec(name);
@@ -156,19 +172,44 @@ export class SystemVariableProvider implements HttpVariableProvider {
                 if (refToggle !== undefined) {
                     processEnvName = await this.resolveSettingsEnvironmentVariable(environmentVarName);
                 }
-                let envValue = process.env[processEnvName];
+                const envValue = process.env[processEnvName];
                 if (envValue !== undefined) {
-                    return { value: envValue.toString()};
+                    return { value: envValue.toString() };
                 } else {
-                    return { value: ''};
+                    return { value: '' };
                 }
             }
             return { warning: ResolveWarningMessage.IncorrectProcessEnvVariableFormat };
         });
     }
 
+    private registerDotenvVariable() {
+        this.resolveFuncs.set(Constants.DotenvVariableName, async (name, document) => {
+            const absolutePath = path.join(path.dirname(document.fileName), '.env');
+            if (!await fs.pathExists(absolutePath)) {
+                return { warning: ResolveWarningMessage.DotenvFileNotFound };
+            }
+            const groups = this.dotenvRegex.exec(name);
+            if (groups !== null && groups.length === 3) {
+                const parsed = dotenv.parse(await fs.readFile(absolutePath));
+                const [, refToggle, key] = groups;
+                let dotEnvVarName = key;
+                if (refToggle !== undefined) {
+                    dotEnvVarName = await this.resolveSettingsEnvironmentVariable(key);
+                }
+                if (!(dotEnvVarName in parsed)) {
+                    return { warning: ResolveWarningMessage.DotenvVariableNotFound };
+                }
+
+                return { value: parsed[dotEnvVarName] };
+            }
+
+            return { warning: ResolveWarningMessage.IncorrectDotenvVariableFormat };
+        });
+    }
+
     private registerAadTokenVariable() {
-        this.resolveFuncs.set(Constants.AzureActiveDirectoryVariableName, (name, context) => {
+        this.resolveFuncs.set(Constants.AzureActiveDirectoryVariableName, (name, document, context) => {
             // get target app from URL
             const match = this.requestUrlRegex.exec(context.parsedRequest);
             const url = (match && match[1]) || context.parsedRequest;
@@ -203,7 +244,7 @@ export class SystemVariableProvider implements HttpVariableProvider {
                         AadTokenCache.set(`${cloud}:${tenantId}`, token);
                     }
 
-                    const tokenString = token ? `${token.tokenType} ${token.accessToken}` : null;
+                    const tokenString = `${token.tokenType} ${token.accessToken}`;
                     if (copy && tokenString) {
                         // only copy the token to the clipboard if it's the first use (since we tell them we're doing it)
                        this.clipboard.writeText(tokenString).then(() => resolve({ value: tokenString }));
@@ -217,7 +258,7 @@ export class SystemVariableProvider implements HttpVariableProvider {
                 const cachedToken = !forceNewToken && AadTokenCache.get(`${cloud}:${tenantId}`);
                 if (cachedToken) {
                     // if token expired, try to refresh; otherwise, use cached token
-                    if (cachedToken.expiresOn <= new Date()) {
+                    if (cachedToken.expiresOn <= new Date() && cachedToken.refreshToken) {
                         authContext.acquireTokenWithRefreshToken(cachedToken.refreshToken, clientId, targetApp, (refreshError: Error, refreshResponse: adal.TokenResponse) => {
                             // if refresh fails, acquire new token; otherwise, cache updated token
                             if (refreshError) {
@@ -237,11 +278,24 @@ export class SystemVariableProvider implements HttpVariableProvider {
         });
     }
 
+    private async resolveSettingsEnvironmentVariable(name: string) {
+        if (await this.innerSettingsEnvironmentVariableProvider.has(name)) {
+            const { value, error, warning } =  await this.innerSettingsEnvironmentVariableProvider.get(name);
+            if (!error && !warning) {
+                return value!.toString();
+            } else {
+                return name;
+            }
+        } else {
+            return name;
+        }
+    }
+
     // #region AAD
 
     private getCloudProvider(endpoint: string): { cloud: string, targetApp: string } {
         for (const c in Constants.AzureClouds) {
-            let { aad, arm, armAudience } = Constants.AzureClouds[c];
+            const { aad, arm, armAudience } = Constants.AzureClouds[c];
             if (aad === endpoint || arm === endpoint) {
                 return {
                     cloud: c,
@@ -299,7 +353,7 @@ export class SystemVariableProvider implements HttpVariableProvider {
                             const client = new HttpClient();
                             const request = new HttpRequest(
                                 "GET", `${Constants.AzureClouds[cloud].arm}/tenants?api-version=2017-08-01`,
-                                { Authorization: this._getTokenString(tokenResponse) }, null, null);
+                                { Authorization: this._getTokenString(tokenResponse) });
                             return client.send(request).then(async value => {
                                 const items = JSON.parse(value.body).value;
                                 const directories: QuickPickItem[] = [];
@@ -320,10 +374,10 @@ export class SystemVariableProvider implements HttpVariableProvider {
                                             const displayNameFirstWord = displayNameSpaceIndex > -1
                                                 ? displayName.substring(0, displayNameSpaceIndex)
                                                 : displayName;
-                                            let bestMatches = [];
-                                            const bestMatchesRegex = new RegExp(`(^${displayNameFirstWord}\.com$)|(^${displayNameFirstWord}\.[a-z]+(?:\.[a-z]+)?$)|(^${displayNameFirstWord}[a-z]+\.com$)|(^${displayNameFirstWord}[^:]*$)|(^[^:]*${displayNameFirstWord}[^:]*$)`, "gi");
-                                            const bestMatchesRegexGroups = bestMatchesRegex.source.match(new RegExp(`${displayNameFirstWord}`, "g")).length;
-                                            for (let d of element.domains) {
+                                            const bestMatches: string[] = [];
+                                            const bestMatchesRegex = new RegExp(`(^${displayNameFirstWord}.com$)|(^${displayNameFirstWord}.[a-z]+(?:.[a-z]+)?$)|(^${displayNameFirstWord}[a-z]+.com$)|(^${displayNameFirstWord}[^:]*$)|(^[^:]*${displayNameFirstWord}[^:]*$)`, "gi");
+                                            const bestMatchesRegexGroups = bestMatchesRegex.source.match(new RegExp(`${displayNameFirstWord}`, "g"))!.length;
+                                            for (const d of element.domains) {
                                                 // find matches; use empty array for all captures (+1 for the full string) if no matches found
                                                 const matches = bestMatchesRegex.exec(d)
                                                     || Array(bestMatchesRegexGroups + 1).fill(null);
@@ -341,7 +395,7 @@ export class SystemVariableProvider implements HttpVariableProvider {
                                             }
 
                                             // use the first match in the array of matches
-                                            domain = bestMatches.find(m => m) || domain;
+                                            domain = bestMatches.find(m => !!m) || domain;
                                         } catch {
                                         }
                                         domain = `${domain} (+${count - 1} more)`;
@@ -361,8 +415,7 @@ export class SystemVariableProvider implements HttpVariableProvider {
                                 });
 
                                 // default to first directory
-                                let result = directories.length && directories[0];
-
+                                let result: QuickPickItem | undefined;
                                 if (directories.length > 1) {
                                     // sort by display name and domain (in case display name isn't unique)
                                     directories.sort((a, b) => a.label + a.detail < b.label + b.detail ? -1 : 1);
@@ -374,12 +427,14 @@ export class SystemVariableProvider implements HttpVariableProvider {
                                         ignoreFocusOut: true,      // keep list open when focus is lost (so we don't have to get the device code again)
                                     };
                                     result = await window.showQuickPick(directories, options);
+                                } else {
+                                    result = directories[0];
                                 }
 
                                 // if directory selected, sign in to that directory; otherwise, stick with the default
                                 if (result) {
                                     const newDirAuthContext = new adal.AuthenticationContext(`${Constants.AzureClouds[cloud].aad}${result.description}`);
-                                    newDirAuthContext.acquireTokenWithRefreshToken(tokenResponse.refreshToken, clientId, null, (newDirError: Error, newDirResponse: adal.TokenResponse) => {
+                                    newDirAuthContext.acquireTokenWithRefreshToken(tokenResponse.refreshToken!, clientId, null!, (newDirError: Error, newDirResponse: adal.TokenResponse) => {
                                         // cache/copy new directory token, if successful
                                         resolve(newDirError ? tokenResponse : newDirResponse, true, true);
                                     });
@@ -399,7 +454,7 @@ export class SystemVariableProvider implements HttpVariableProvider {
     }
 
     private _getTokenString(token: adal.TokenResponse) {
-        return token ? `${token.tokenType} ${token.accessToken}` : null;
+        return token ? `${token.tokenType} ${token.accessToken}` : '';
     }
 
     // #endregion

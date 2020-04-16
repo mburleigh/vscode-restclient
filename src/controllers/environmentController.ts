@@ -1,78 +1,73 @@
-"use strict";
-
-import { languages, StatusBarAlignment, StatusBarItem, window } from 'vscode';
+import { EventEmitter, QuickPickItem, window } from 'vscode';
 import * as Constants from '../common/constants';
 import { RestClientSettings } from '../models/configurationSettings';
-import { EnvironmentPickItem } from '../models/environmentPickItem';
 import { trace } from "../utils/decorator";
-import { PersistUtility } from '../utils/persistUtility';
-import { getCurrentTextDocument } from '../utils/workspaceUtility';
+import { EnvironmentStatusEntry } from '../utils/environmentStatusBarEntry';
+import { UserDataManager } from '../utils/userDataManager';
+
+type EnvironmentPickItem = QuickPickItem & { name: string };
 
 export class EnvironmentController {
-    private static readonly noEnvironmentPickItem: EnvironmentPickItem = new EnvironmentPickItem(
-        'No Environment', Constants.NoEnvironmentSelectedName, 'You Can Still Use Variables Defined In $shared Environment');
+    private static readonly noEnvironmentPickItem: EnvironmentPickItem = {
+        label: 'No Environment',
+        name: Constants.NoEnvironmentSelectedName,
+        description: 'You can still use variables defined in the $shared environment'
+    };
 
     public static readonly sharedEnvironmentName: string = '$shared';
-    private static readonly settings: RestClientSettings = RestClientSettings.Instance;
 
-    private _environmentStatusBarItem: StatusBarItem;
+    private static readonly _onDidChangeEnvironment = new EventEmitter<string>();
 
-    public constructor(initEnvironment: EnvironmentPickItem) {
-        this._environmentStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Right, 100);
-        this._environmentStatusBarItem.command = 'rest-client.switch-environment';
-        this._environmentStatusBarItem.text = initEnvironment.label;
-        this._environmentStatusBarItem.tooltip = 'Switch REST Client Environment';
-        this._environmentStatusBarItem.show();
+    public static readonly onDidChangeEnvironment = EnvironmentController._onDidChangeEnvironment.event;
 
-        window.onDidChangeActiveTextEditor(this.showHideStatusBar, this);
+    private readonly settings: RestClientSettings = RestClientSettings.Instance;
+
+    private environmentStatusEntry: EnvironmentStatusEntry;
+
+    private currentEnvironment: EnvironmentPickItem;
+
+    private constructor(initEnvironment: EnvironmentPickItem) {
+        this.currentEnvironment = initEnvironment;
+        this.environmentStatusEntry = new EnvironmentStatusEntry(initEnvironment.label);
     }
 
     @trace('Switch Environment')
     public async switchEnvironment() {
-        let currentEnvironment = await EnvironmentController.getCurrentEnvironment();
-        let itemPickList: EnvironmentPickItem[] = [];
-        itemPickList.push(EnvironmentController.noEnvironmentPickItem);
-        for (let name in EnvironmentController.settings.environmentVariables) {
-            if (name === EnvironmentController.sharedEnvironmentName) {
-                continue;
-            }
-            let item = new EnvironmentPickItem(name, name);
-            if (item.name === currentEnvironment.name) {
-                item.description = '$(check)';
-            }
-            itemPickList.push(item);
-        }
+        // Add no environment at the top
+        const userEnvironments: EnvironmentPickItem[] =
+            Object.keys(this.settings.environmentVariables)
+                .filter(name => name !== EnvironmentController.sharedEnvironmentName)
+                .map(name => ({
+                    name,
+                    label: name,
+                    description: name === this.currentEnvironment.name ? '$(check)' : undefined
+                }));
 
-        let item = await window.showQuickPick(itemPickList, { placeHolder: "Select REST Client Environment" });
+        const itemPickList: EnvironmentPickItem[] = [EnvironmentController.noEnvironmentPickItem, ...userEnvironments];
+        const item = await window.showQuickPick(itemPickList, { placeHolder: "Select REST Client Environment" });
         if (!item) {
             return;
         }
 
-        this._environmentStatusBarItem.text = item.label;
+        this.currentEnvironment = item;
 
-        await PersistUtility.saveEnvironment(item);
+        EnvironmentController._onDidChangeEnvironment.fire(item.label);
+        this.environmentStatusEntry.update(item.label);
+
+        await UserDataManager.setEnvironment(item);
+    }
+
+    public static async create(): Promise<EnvironmentController> {
+        const environment = await this.getCurrentEnvironment();
+        return new EnvironmentController(environment);
     }
 
     public static async getCurrentEnvironment(): Promise<EnvironmentPickItem> {
-        let currentEnvironment = await PersistUtility.loadEnvironment();
-        if (!currentEnvironment) {
-            currentEnvironment = EnvironmentController.noEnvironmentPickItem;
-            await PersistUtility.saveEnvironment(currentEnvironment);
-        }
-        return currentEnvironment;
+        const currentEnvironment = await UserDataManager.getEnvironment() as EnvironmentPickItem | undefined;
+        return currentEnvironment || this.noEnvironmentPickItem;
     }
 
     public dispose() {
-        this._environmentStatusBarItem.dispose();
-    }
-
-    private showHideStatusBar() {
-        const document = getCurrentTextDocument();
-        if (document && languages.match(['http', 'plaintext'], document)) {
-            this._environmentStatusBarItem.show();
-            return;
-        } else {
-            this._environmentStatusBarItem.hide();
-        }
+        this.environmentStatusEntry.dispose();
     }
 }

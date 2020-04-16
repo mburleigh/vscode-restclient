@@ -1,23 +1,12 @@
-'use strict';
-
 import { OutputChannel, window } from 'vscode';
 import { RestClientSettings } from './models/configurationSettings';
 import { LogLevel } from './models/logLevel';
 
-let outputChannel: OutputChannel;
-
-function getOrCreateOutputChannel() {
-    if (!outputChannel) {
-        outputChannel = window.createOutputChannel('REST');
-    }
-    return outputChannel;
-}
-
-export class Logger {
+class Log {
     private readonly _outputChannel: OutputChannel;
     private readonly _restClientSettings: RestClientSettings = RestClientSettings.Instance;
     public constructor() {
-        this._outputChannel = getOrCreateOutputChannel();
+        this._outputChannel = window.createOutputChannel('REST');
     }
 
     public verbose(message: string, data?: any): void {
@@ -38,7 +27,7 @@ export class Logger {
 
     public log(level: LogLevel, message: string, data?: any): void {
         if (level >= this._restClientSettings.logLevel) {
-            this._outputChannel.appendLine(`[${LogLevel[level]}  - ${(new Date().toLocaleTimeString())}] ${message}`);
+            this._outputChannel.appendLine(`[${LogLevel[level]} - ${(new Date().toLocaleTimeString())}] ${message}`);
             if (data) {
                 this._outputChannel.appendLine(this.data2String(data));
             }
@@ -57,3 +46,6 @@ export class Logger {
         return JSON.stringify(data, null, 2);
     }
 }
+
+const Logger = new Log();
+export default Logger;

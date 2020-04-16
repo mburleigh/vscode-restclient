@@ -1,8 +1,7 @@
-"use strict";
-
 import { EOL } from 'os';
 import { Range, TextEditor } from 'vscode';
 import * as Constants from '../common/constants';
+import { VariableProcessor } from './variableProcessor';
 
 export interface RequestRangeOptions {
     ignoreCommentLine?: boolean;
@@ -11,36 +10,66 @@ export interface RequestRangeOptions {
     ignoreResponseRange?: boolean;
 }
 
+export interface SelectedRequest {
+    text: string;
+    name?: string;
+    warnBeforeSend: boolean;
+}
+
 export class Selector {
     private static readonly responseStatusLineRegex = /^\s*HTTP\/[\d.]+/;
 
-    public static getRequestText(editor: TextEditor, range: Range = null): string {
-        if (!editor || !editor.document) {
+    public static async getRequest(editor: TextEditor, range: Range | null = null): Promise<SelectedRequest | null> {
+        if (!editor.document) {
             return null;
         }
 
-        let selectedText: string;
+        let selectedText: string | null;
         if (editor.selection.isEmpty || range) {
-            let activeLine = !range ? editor.selection.active.line : range.start.line;
-            selectedText = Selector.getDelimitedText(editor.document.getText(), activeLine);
+            const activeLine = range?.start.line ?? editor.selection.active.line;
+            selectedText = this.getDelimitedText(editor.document.getText(), activeLine);
         } else {
             selectedText = editor.document.getText(editor.selection);
         }
 
-        return selectedText;
+        if (selectedText === null) {
+            return null;
+        }
+
+        // parse request variable definition name
+        const requestVariable = this.getRequestVariableDefinitionName(selectedText);
+
+        // parse #@note comment
+        const warnBeforeSend = this.hasNoteComment(selectedText);
+
+        // parse actual request lines
+        const rawLines = selectedText.split(Constants.LineSplitterRegex).filter(l => !this.isCommentLine(l));
+        const requestRange = this.getRequestRanges(rawLines)[0];
+        if (!requestRange) {
+            return null;
+        }
+
+        selectedText = rawLines.slice(requestRange[0], requestRange[1] + 1).join(EOL);
+
+        // variables replacement
+        selectedText = await VariableProcessor.processRawRequest(selectedText);
+
+        return {
+            text: selectedText,
+            name: requestVariable,
+            warnBeforeSend
+        };
     }
 
     public static getRequestRanges(lines: string[], options?: RequestRangeOptions): [number, number][] {
-        options = Object.assign(
-            {
+        options = {
                 ignoreCommentLine: true,
                 ignoreEmptyLine: true,
                 ignoreFileVariableDefinitionLine: true,
-                ignoreResponseRange: true
-            },
-            options);
+                ignoreResponseRange: true,
+            ...options};
         const requestRanges: [number, number][] = [];
-        const delimitedLines = Selector.getDelimiterRows(lines);
+        const delimitedLines = this.getDelimiterRows(lines);
         delimitedLines.push(lines.length);
 
         let prev = -1;
@@ -49,20 +78,20 @@ export class Selector {
             let end = current - 1;
             while (start <= end) {
                 const startLine = lines[start];
-                if (options.ignoreResponseRange && Selector.isResponseStatusLine(startLine)) {
+                if (options.ignoreResponseRange && this.isResponseStatusLine(startLine)) {
                     break;
                 }
 
-                if (options.ignoreCommentLine && Selector.isCommentLine(startLine)
-                    || options.ignoreEmptyLine && Selector.isEmptyLine(startLine)
-                    || options.ignoreFileVariableDefinitionLine && Selector.isVariableDefinitionLine(startLine)) {
+                if (options.ignoreCommentLine && this.isCommentLine(startLine)
+                    || options.ignoreEmptyLine && this.isEmptyLine(startLine)
+                    || options.ignoreFileVariableDefinitionLine && this.isFileVariableDefinitionLine(startLine)) {
                     start++;
                     continue;
                 }
 
                 const endLine = lines[end];
-                if (options.ignoreCommentLine && Selector.isCommentLine(endLine)
-                    || options.ignoreEmptyLine && Selector.isEmptyLine(endLine)) {
+                if (options.ignoreCommentLine && this.isCommentLine(endLine)
+                    || options.ignoreEmptyLine && this.isEmptyLine(endLine)) {
                     end--;
                     continue;
                 }
@@ -76,11 +105,6 @@ export class Selector {
         return requestRanges;
     }
 
-    public static getRequestVariableDefinitionName(text: string): string {
-        const matched = text.match(Constants.RequestVariableDefinitionRegex);
-        return matched && matched[1];
-    }
-
     public static isCommentLine(line: string): boolean {
         return Constants.CommentIdentifiersRegex.test(line);
     }
@@ -89,17 +113,30 @@ export class Selector {
         return line.trim() === '';
     }
 
-    public static isVariableDefinitionLine(line: string): boolean {
+    public static isRequestVariableDefinitionLine(line: string): boolean {
+        return Constants.RequestVariableDefinitionRegex.test(line);
+    }
+
+    public static isFileVariableDefinitionLine(line: string): boolean {
         return Constants.FileVariableDefinitionRegex.test(line);
     }
 
     public static isResponseStatusLine(line: string): boolean {
-        return Selector.responseStatusLineRegex.test(line);
+        return this.responseStatusLineRegex.test(line);
     }
 
-    private static getDelimitedText(fullText: string, currentLine: number): string {
-        let lines: string[] = fullText.split(Constants.LineSplitterRegex);
-        let delimiterLineNumbers: number[] = Selector.getDelimiterRows(lines);
+    public static getRequestVariableDefinitionName(text: string): string | undefined {
+        const matched = text.match(Constants.RequestVariableDefinitionRegex);
+        return matched?.[1];
+    }
+
+    public static hasNoteComment(text: string): boolean {
+        return Constants.NoteCommentRegex.test(text);
+    }
+
+    private static getDelimitedText(fullText: string, currentLine: number): string | null {
+        const lines: string[] = fullText.split(Constants.LineSplitterRegex);
+        const delimiterLineNumbers: number[] = this.getDelimiterRows(lines);
         if (delimiterLineNumbers.length === 0) {
             return fullText;
         }
@@ -118,21 +155,19 @@ export class Selector {
         }
 
         for (let index = 0; index < delimiterLineNumbers.length - 1; index++) {
-            let start = delimiterLineNumbers[index];
-            let end = delimiterLineNumbers[index + 1];
+            const start = delimiterLineNumbers[index];
+            const end = delimiterLineNumbers[index + 1];
             if (start < currentLine && currentLine < end) {
                 return lines.slice(start + 1, end).join(EOL);
             }
         }
+
+        return null;
     }
 
     private static getDelimiterRows(lines: string[]): number[] {
-        let rows: number[] = [];
-        for (let index = 0; index < lines.length; index++) {
-            if (lines[index].match(/^#{3,}/)) {
-                rows.push(index);
-            }
-        }
-        return rows;
+        return Object.entries(lines)
+            .filter(([, value]) => /^#{3,}/.test(value))
+            .map(([index, ]) => +index);
     }
 }

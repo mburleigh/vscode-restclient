@@ -1,11 +1,8 @@
-'use strict';
-
 import { TextDocument } from 'vscode';
 import * as Constants from '../../common/constants';
+import { DocumentCache } from '../../models/documentCache';
 import { ResolveErrorMessage, ResolveResult, ResolveState, ResolveWarningMessage } from '../../models/httpVariableResolveResult';
-import { RequestVariableCacheKey } from '../../models/requestVariableCacheKey';
 import { VariableType } from '../../models/variableType';
-import { calculateMD5Hash } from '../misc';
 import { RequestVariableCache } from '../requestVariableCache';
 import { RequestVariableCacheValueProcessor } from '../requestVariableCacheValueProcessor';
 import { HttpVariable, HttpVariableProvider } from './httpVariableProvider';
@@ -14,37 +11,35 @@ export class RequestVariableProvider implements HttpVariableProvider {
     private static _instance: RequestVariableProvider;
 
     public static get Instance(): RequestVariableProvider {
-        if (!RequestVariableProvider._instance) {
-            RequestVariableProvider._instance = new RequestVariableProvider();
+        if (!this._instance) {
+            this._instance = new RequestVariableProvider();
         }
 
-        return RequestVariableProvider._instance;
+        return this._instance;
     }
 
-    private readonly cache = new Map<string, string[]>();
-
-    private readonly fileMD5Hash = new Map<string, string>();
+    private readonly requestVariableCache = new DocumentCache<string[]>();
 
     private constructor() {
     }
 
     public readonly type: VariableType = VariableType.Request;
 
-    public async has(document: TextDocument, name: string): Promise<boolean> {
+    public async has(name: string, document: TextDocument): Promise<boolean> {
         const [variableName] = name.trim().split('.');
         const variables = this.getRequestVariables(document);
         return variables.includes(variableName);
     }
 
-    public async get(document: TextDocument, name: string): Promise<HttpVariable> {
+    public async get(name: string, document: TextDocument): Promise<HttpVariable> {
         const [variableName] = name.trim().split('.');
         const variables = this.getRequestVariables(document);
         if (!variables.includes(variableName)) {
             return { name: variableName, error: ResolveErrorMessage.RequestVariableNotExist };
         }
-        const value = RequestVariableCache.get(new RequestVariableCacheKey(variableName, document.uri.toString()));
+        const value = RequestVariableCache.get(document, variableName);
         if (value === undefined) {
-            return { name: variableName , warning: ResolveWarningMessage.RequestVariableNotSent };
+            return { name: variableName, warning: ResolveWarningMessage.RequestVariableNotSent };
         }
 
         const resolveResult = RequestVariableCacheValueProcessor.resolveRequestVariable(value, name);
@@ -53,27 +48,27 @@ export class RequestVariableProvider implements HttpVariableProvider {
 
     public async getAll(document: TextDocument): Promise<HttpVariable[]> {
         const variables = this.getRequestVariables(document);
-        return variables.map(v => ({ name: v, value: RequestVariableCache.get(new RequestVariableCacheKey(v, document.uri.toString())) }));
+        return variables.map(v => ({ name: v, value: RequestVariableCache.get(document, v) }));
     }
 
     private getRequestVariables(document: TextDocument): string[] {
-        const file = document.uri.toString();
-        const fileContent = document.getText();
-        const fileHash = calculateMD5Hash(fileContent);
-        if (!this.cache.has(file) || fileHash !== this.fileMD5Hash.get(file)) {
-            const requestVariableReferenceRegex = new RegExp(Constants.RequestVariableDefinitionWithNameRegexFactory('\\w+'), 'mg');
-
-            const variableNames = new Set<string>();
-            let match: RegExpExecArray;
-            while (match = requestVariableReferenceRegex.exec(fileContent)) {
-                const name = match[1];
-                variableNames.add(name);
-            }
-            this.cache.set(file, [...variableNames]);
-            this.fileMD5Hash.set(file, fileHash);
+        if (this.requestVariableCache.has(document)) {
+            return this.requestVariableCache.get(document)!;
         }
 
-        return this.cache.get(file);
+        const fileContent = document.getText();
+        const requestVariableReferenceRegex = new RegExp(Constants.RequestVariableDefinitionWithNameRegexFactory('\\w+'), 'mg');
+
+        const variableNames = new Set<string>();
+        let match: RegExpExecArray | null;
+        while (match = requestVariableReferenceRegex.exec(fileContent)) {
+            const name = match[1];
+            variableNames.add(name);
+        }
+
+        const values = [...variableNames];
+        this.requestVariableCache.set(document, values);
+        return values;
     }
 
     private convertToHttpVariable(name: string, result: ResolveResult): HttpVariable {

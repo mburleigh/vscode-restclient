@@ -1,5 +1,3 @@
-'use strict';
-
 import { createScanner, SyntaxKind } from 'jsonc-parser';
 import * as os from 'os';
 import { window } from 'vscode';
@@ -21,11 +19,11 @@ export class ResponseFormatUtility {
         [SyntaxKind.FalseKeyword]: 'false'
     };
 
-    public static formatBody(body: string, contentType: string, suppressValidation: boolean): string {
+    public static formatBody(body: string, contentType: string | undefined, suppressValidation: boolean): string {
         if (contentType) {
             if (MimeUtility.isJSON(contentType)) {
                 if (isJSONString(body)) {
-                    body = ResponseFormatUtility.jsonPrettify(body);
+                    body = this.jsonPrettify(body);
                 } else if (!suppressValidation) {
                     window.showWarningMessage('The content type of response is application/json, while response body is not a valid json string');
                 }
@@ -36,7 +34,7 @@ export class ResponseFormatUtility {
             } else {
                 // Add this for the case that the content type of response body is not very accurate #239
                 if (isJSONString(body)) {
-                    body = ResponseFormatUtility.jsonPrettify(body);
+                    body = this.jsonPrettify(body);
                 }
             }
         }
@@ -71,14 +69,14 @@ export class ResponseFormatUtility {
 
             switch (firstToken) {
                 case SyntaxKind.OpenBraceToken:
-                    result += ResponseFormatUtility.jsonSpecialTokenMapping[firstToken];
+                    result += this.jsonSpecialTokenMapping[firstToken];
                     if (secondToken !== SyntaxKind.CloseBraceToken) {
                         indentLevel++;
                         result += newLineAndIndent();
                     }
                     break;
                 case SyntaxKind.OpenBracketToken:
-                    result += ResponseFormatUtility.jsonSpecialTokenMapping[firstToken];
+                    result += this.jsonSpecialTokenMapping[firstToken];
                     if (secondToken !== SyntaxKind.CloseBracketToken) {
                         indentLevel++;
                         result += newLineAndIndent();
@@ -89,7 +87,7 @@ export class ResponseFormatUtility {
                 case SyntaxKind.NullKeyword:
                 case SyntaxKind.TrueKeyword:
                 case SyntaxKind.FalseKeyword:
-                    result += ResponseFormatUtility.jsonSpecialTokenMapping[firstToken];
+                    result += this.jsonSpecialTokenMapping[firstToken];
                     if (secondToken === SyntaxKind.CloseBraceToken
                         || secondToken === SyntaxKind.CloseBracketToken) {
                         indentLevel--;
@@ -97,7 +95,7 @@ export class ResponseFormatUtility {
                     }
                     break;
                 case SyntaxKind.CommaToken:
-                    result += ResponseFormatUtility.jsonSpecialTokenMapping[firstToken];
+                    result += this.jsonSpecialTokenMapping[firstToken];
                     if (secondToken === SyntaxKind.CloseBraceToken
                         || secondToken === SyntaxKind.CloseBracketToken) {
                         indentLevel--;
@@ -105,7 +103,7 @@ export class ResponseFormatUtility {
                     result += newLineAndIndent();
                     break;
                 case SyntaxKind.ColonToken:
-                    result += ResponseFormatUtility.jsonSpecialTokenMapping[firstToken] + ' ';
+                    result += this.jsonSpecialTokenMapping[firstToken] + ' ';
                     break;
                 case SyntaxKind.StringLiteral:
                 case SyntaxKind.NumericLiteral:

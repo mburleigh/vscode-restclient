@@ -1,37 +1,35 @@
-"use strict";
+import { Event, EventEmitter, TextDocument } from "vscode";
+import { DocumentCache } from '../models/documentCache';
+import { HttpResponse } from '../models/httpResponse';
 
-import { Event, EventEmitter } from "vscode";
-import { RequestVariableCacheKey } from "../models/requestVariableCacheKey";
-import { RequestVariableCacheValue } from '../models/requestVariableCacheValue';
-import { RequestVariableEvent } from '../models/requestVariableEvent';
+type RequestVariableEvent = {
+    name: string;
+    document: TextDocument;
+};
 
 export class RequestVariableCache {
-    private static cache: Map<string, RequestVariableCacheValue> = new Map<string, RequestVariableCacheValue>();
+    private static cache = new DocumentCache<Map<string, HttpResponse>>(true);
 
     private static readonly eventEmitter = new EventEmitter<RequestVariableEvent>();
 
     public static get onDidCreateNewRequestVariable(): Event<RequestVariableEvent> {
-        return RequestVariableCache.eventEmitter.event;
+        return this.eventEmitter.event;
     }
 
-    public static get size(): number {
-        return RequestVariableCache.cache.size;
+    public static add(document: TextDocument, name: string, response: HttpResponse) {
+        if (!this.cache.has(document)) {
+            this.cache.set(document, new Map<string, HttpResponse>());
+        }
+
+        this.cache.get(document)!.set(name, response);
+        this.eventEmitter.fire({ name, document });
     }
 
-    public static add(cacheKey: RequestVariableCacheKey, value: RequestVariableCacheValue) {
-        RequestVariableCache.cache.set(cacheKey.getCacheKey(), value);
-        RequestVariableCache.eventEmitter.fire({ cacheKey });
+    public static has(document: TextDocument, name: string): boolean {
+        return this.cache.has(document) && this.cache.get(document)!.has(name);
     }
 
-    public static has(cacheKey: RequestVariableCacheKey): boolean {
-        return RequestVariableCache.cache.has(cacheKey.getCacheKey());
-    }
-
-    public static get(cacheKey: RequestVariableCacheKey): RequestVariableCacheValue {
-        return RequestVariableCache.cache.get(cacheKey.getCacheKey());
-    }
-
-    public static remove(cacheKey: RequestVariableCacheKey) {
-        RequestVariableCache.cache.delete(cacheKey.getCacheKey());
+    public static get(document: TextDocument, name: string): HttpResponse | undefined {
+        return this.cache.get(document)?.get(name);
     }
 }

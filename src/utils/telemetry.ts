@@ -1,8 +1,5 @@
-'use strict';
-
 import * as appInsights from "applicationinsights";
-import packageLockJson from '../../package-lock.json';
-import packageJson from '../../package.json';
+import { extensions } from 'vscode';
 import * as Constants from '../common/constants';
 import { RestClientSettings } from '../models/configurationSettings';
 
@@ -22,16 +19,16 @@ export class Telemetry {
     private static defaultClient: appInsights.TelemetryClient;
 
     public static initialize() {
-        Telemetry.defaultClient = appInsights.defaultClient;
-        const context = Telemetry.defaultClient.context;
-        context.tags[context.keys.applicationVersion] = packageJson.version;
-        context.tags[context.keys.internalSdkVersion] = `node:${packageLockJson.dependencies.applicationinsights.version}`;
+        this.defaultClient = appInsights.defaultClient;
+        const context = this.defaultClient.context;
+        const extension = extensions.getExtension(Constants.ExtensionId);
+        context.tags[context.keys.applicationVersion] = extension?.packageJSON.version;
     }
 
     public static sendEvent(eventName: string, properties?: { [key: string]: string }) {
         try {
-            if (Telemetry.restClientSettings.enableTelemetry) {
-                Telemetry.defaultClient.trackEvent({ name: eventName, properties });
+            if (this.restClientSettings.enableTelemetry) {
+                this.defaultClient.trackEvent({ name: eventName, properties });
             }
         } catch {
         }

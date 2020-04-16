@@ -1,3 +1,41 @@
+## 0.23.2 (2020/3/9)
+* __Bug Fix__: [Redirect 303 use port of original request](https://github.com/Huachao/vscode-restclient/issues/502)
+* __Bug Fix__: [Cookie header not respected when `rest-client.rememberCookiesForSubsequentRequest` is set to `false`](https://github.com/Huachao/vscode-restclient/issues/507)
+* __Bug Fix__: [Fix cookies not sent when redirection happens](https://github.com/Huachao/vscode-restclient/issues/513)
+* __Bug Fix__: Disable folding on non range start line in webview
+* __Bug Fix__: Fix Basic auth not working in auth challenge case
+* __Bug Fix__: [Hover peeking doesn't work for variables with hyphen](https://github.com/Huachao/vscode-restclient/issues/534)
+* __Bug Fix__: [Textmate lexer file is invalid](https://github.com/Huachao/vscode-restclient/issues/517)
+* __Improvement__: [Add `[%]envVarName` option to `{{$dotenv}}`](https://github.com/Huachao/vscode-restclient/issues/512)
+* __Improvement__: [Basic authentication encoding doesn't support empty password](https://github.com/Huachao/vscode-restclient/issues/533)
+* __Improvement__: Decrease bundled size from *2.6M* to *2.3M*
+* __Improvement__: Allow public prefix for cookiJar
+
+## 0.23.1 (2020/1/21)
+* __Bug Fix__: [Respect user provided cookie headers](https://github.com/Huachao/vscode-restclient/issues/465)
+* __Bug Fix__: [Cannot read property `toFixed` of null](https://github.com/Huachao/vscode-restclient/issues/450)
+* __Bug Fix__: [Fix incorrect RFC 1123 date time format in datetime system variable](https://github.com/Huachao/vscode-restclient/issues/464)
+* __Bug Fix__: [Ignore cookie domain mismatch error in `SetCookie` header](https://github.com/Huachao/vscode-restclient/issues/470)
+* __Bug Fix__: [Set correct line ending character for multipart/form-data MIME type](https://github.com/Huachao/vscode-restclient/issues/456)
+* __Bug Fix__: [Disable automatical retry on failure](https://github.com/Huachao/vscode-restclient/issues/490)
+* __Bug Fix__: [fix command `rest-client-*` not found error](https://github.com/Huachao/vscode-restclient/pull/449) ([@stegano](stegano))
+* __Improvement__: [Support empty value for file varaible](https://github.com/Huachao/vscode-restclient/issues/322)
+* __Improvement__: [Collapse/Expand children recursively in response webview with `Shift` modifier key](https://github.com/Huachao/vscode-restclient/issues/484)
+* __Improvement__: [Show request name if available in symbol list](https://github.com/Huachao/vscode-restclient/issues/461)
+* __Improvement__: [Use document level cache to improve parsing performance](https://github.com/Huachao/vscode-restclient/issues/463)
+* __Improvement__: Support cancelling an outgoing request by clicking the spin icon
+* __Improvement__: Refresh diagnostic information when switching environment
+
+## 0.23.0 (2019/11/20)
+* __Feature__: [Add new system varaible - .env file variable](https://github.com/Huachao/vscode-restclient/issues/418)
+* __Feature__: [Add new system varaible - local datetime](https://github.com/Huachao/vscode-restclient/issues/433)
+* __Bug Fix__: [308 Permanent Redirect changes method to GET](https://github.com/Huachao/vscode-restclient/issues/436)
+* __Bug Fix__: [Command `Copy As cURL` not working for request method in lower case](https://github.com/Huachao/vscode-restclient/issues/431)
+* __Bug Fix__: [Preserve custom request header case](https://github.com/Huachao/vscode-restclient/issues/435)
+* __Bug Fix__: Fix scroll to top not working
+* __Improvement__: [Replaced images with vscode-icons](https://github.com/Huachao/vscode-restclient/pull/440) ([@lochstar](lochstar))
+* __Improvement__: [Ignore user provided `Content-Length` value](https://github.com/Huachao/vscode-restclient/issues/424)
+
 ## 0.22.2 (2019/9/25)
 * __Feature__: Go to definition support for request variables
 * __Bug Fix__: [Fix header auto completion is broken](https://github.com/Huachao/vscode-restclient/issues/422)

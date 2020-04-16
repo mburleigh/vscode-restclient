@@ -1,11 +1,8 @@
-"use strict";
-
 import { HttpRequest } from "../models/httpRequest";
 import { HttpResponse } from '../models/httpResponse';
 import { ResolveErrorMessage, ResolveResult, ResolveState, ResolveWarningMessage } from "../models/httpVariableResolveResult";
-import { RequestVariableCacheValue } from '../models/requestVariableCacheValue';
 import { MimeUtility } from './mimeUtility';
-import { getHeader } from './misc';
+import { getContentType, getHeader } from './misc';
 
 const xpath = require('xpath');
 const { DOMParser } = require('xmldom');
@@ -13,10 +10,11 @@ const { JSONPath } = require('jsonpath-plus');
 
 const requestVariablePathRegex: RegExp = /^(\w+)(?:\.(request|response)(?:\.(body|headers)(?:\.(.*))?)?)?$/;
 
+type HttpEntity = 'request' | 'response';
 type HttpPart = 'headers' | 'body';
 
 export class RequestVariableCacheValueProcessor {
-    public static resolveRequestVariable(value: RequestVariableCacheValue, path: string): ResolveResult {
+    public static resolveRequestVariable(value: HttpResponse | undefined, path: string): ResolveResult {
         if (!value || !path) {
             return { state: ResolveState.Error, message: ResolveErrorMessage.NoRequestVariablePath };
         }
@@ -33,13 +31,13 @@ export class RequestVariableCacheValueProcessor {
             return { state: ResolveState.Warning, value, message: ResolveWarningMessage.MissingRequestEntityName };
         }
 
-        const httpEntity = value[type];
+        const httpEntity = (type as HttpEntity) === 'request' ? value.request : value;
 
         if (!httpPart) {
             return { state: ResolveState.Warning, value: httpEntity, message: ResolveWarningMessage.MissingRequestEntityPart };
         }
 
-        return RequestVariableCacheValueProcessor.resolveHttpPart(httpEntity, httpPart as HttpPart, nameOrPath);
+        return this.resolveHttpPart(httpEntity, httpPart as HttpPart, nameOrPath);
     }
 
     private static resolveHttpPart(http: HttpRequest | HttpResponse, httpPart: HttpPart, nameOrPath?: string): ResolveResult {
@@ -59,13 +57,13 @@ export class RequestVariableCacheValueProcessor {
                 return { state: ResolveState.Success, value: body };
             }
 
-            const contentTypeHeader = getHeader(headers, 'content-type');
+            const contentTypeHeader = getContentType(headers);
             if (MimeUtility.isJSON(contentTypeHeader)) {
                 const parsedBody = JSON.parse(body as string);
 
-                return RequestVariableCacheValueProcessor.resolveJsonHttpBody(parsedBody, nameOrPath);
+                return this.resolveJsonHttpBody(parsedBody, nameOrPath);
             } else if (MimeUtility.isXml(contentTypeHeader)) {
-                return RequestVariableCacheValueProcessor.resolveXmlHttpBody(body, nameOrPath);
+                return this.resolveXmlHttpBody(body, nameOrPath);
             } else {
                 return { state: ResolveState.Warning, value: body, message: ResolveWarningMessage.UnsupportedBodyContentType };
             }

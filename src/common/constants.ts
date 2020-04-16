@@ -1,20 +1,6 @@
-'use strict';
 
 export const ExtensionId: string = 'humao.rest-client';
 export const AiKey: string = 'ad746e27-4a36-441c-8b94-5db178f81ae3';
-export const CSSFileName: string = 'rest-client.css';
-export const CSSFolderName: string = 'styles';
-export const ScriptFileName: string = 'main.js';
-export const ScriptsFolderName: string = 'scripts';
-export const ImagesFolderName: string = 'images';
-export const IconFileName: string = 'rest_icon.png';
-export const ExtensionFolderName: string = '.rest-client';
-export const HistoryFileName: string = 'history.json';
-export const CookieFileName: string = 'cookie.json';
-export const EnvironmentFileName: string = 'environment.json';
-export const DefaultResponseDownloadFolderName: string = 'responses/raw';
-export const DefaultResponseBodyDownloadFolderName: string = 'responses/body';
-export const HistoryItemsMaxCount: number = 50;
 
 export const NoEnvironmentSelectedName: string = 'c0cfe680-4fcd-4b71-a4ba-8cfaee57680a';
 
@@ -23,13 +9,16 @@ export const TimeStampVariableDescription = "Add a number of milliseconds betwee
  You can also provide the offset with current time in the format {{$timestamp number string}}";
 export const DateTimeVariableName = "$datetime";
 export const DateTimeVariableNameDescription = "Add a datetime string in either ISO8601 or RFC1123 format";
+export const LocalDateTimeVariableName = "$localDatetime";
+export const LocalDateTimeVariableNameDescription = "Add a local datetime string in either ISO8601 or RFC1123 format";
 export const GuidVariableName = "$guid";
 export const GuidVariableDescription = "Add a RFC 4122 v4 UUID";
 export const RandomIntVariableName = "$randomInt";
 export const RandomIntDescription = "Returns a random integer between min (included) and max (excluded)";
 export const ProcessEnvVariableName = "$processEnv";
 export const ProcessEnvDescription = "Returns the value of process environment variable or '' if not found ";
-
+export const DotenvVariableName = "$dotenv";
+export const DotenvDescription = "Returns the environment value stored in a .env file";
 export const AzureActiveDirectoryVariableName = "$aadToken";
 export const AzureActiveDirectoryDescription = "Prompts to sign in to Azure AD and adds the token to the request";
 /**
@@ -69,11 +58,13 @@ export const AzureClouds: { [key: string]: { aad: string, arm: string, armAudien
 
 export const CommentIdentifiersRegex: RegExp = /^\s*(#|\/{2})/;
 
-export const FileVariableDefinitionRegex: RegExp = /^\s*@([^\s=]+)\s*=\s*(.+?)\s*$/;
+export const FileVariableDefinitionRegex: RegExp = /^\s*@([^\s=]+)\s*=\s*(.*?)\s*$/;
 
 export const RequestVariableDefinitionWithNameRegexFactory = (name: string, flags?: string): RegExp =>
     new RegExp(`^\\s*(?:#{1,}|\\/{2,})\\s+@name\\s+(${name})\\s*$`, flags);
 
 export const RequestVariableDefinitionRegex: RegExp = RequestVariableDefinitionWithNameRegexFactory("\\w+", "m");
+
+export const NoteCommentRegex = /^\s*(?:#{1,}|\/{2,})\s*@note\s*$/m;
 
 export const LineSplitterRegex: RegExp = /\r?\n/g;

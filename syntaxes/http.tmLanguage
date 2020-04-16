@@ -27,7 +27,7 @@
                     <key>0</key>
                     <dict>
                         <key>name</key>
-                        <string>comment.source.sharp.http</string>
+                        <string>comment.line.sharp.http</string>
                     </dict>
                 </dict>
                 <key>patterns</key>
@@ -50,7 +50,7 @@
                     <key>0</key>
                     <dict>
                         <key>name</key>
-                        <string>comment.source.sharp.http</string>
+                        <string>comment.line.sharp.http</string>
                     </dict>
                 </dict>
                 <key>patterns</key>
@@ -63,7 +63,7 @@
             </dict>
             <dict>
                 <key>begin</key>
-                <string>^\s*(?=\<\S)</string>
+                <string>^\s*(?=&lt;\S)</string>
                 <key>name</key>
                 <string>http.request.body.xml</string>
                 <key>end</key>
@@ -73,7 +73,7 @@
                     <key>0</key>
                     <dict>
                         <key>name</key>
-                        <string>comment.source.sharp.http</string>
+                        <string>comment.line.sharp.http</string>
                     </dict>
                 </dict>
                 <key>patterns</key>
@@ -96,7 +96,7 @@
                     <key>0</key>
                     <dict>
                         <key>name</key>
-                        <string>comment.source.sharp.http</string>
+                        <string>comment.line.sharp.http</string>
                     </dict>
                 </dict>
                 <key>patterns</key>
@@ -124,13 +124,13 @@
             </dict>
             <dict>
                 <key>match</key>
-                <string>^\s*#{1,}\s*(?:((@)name)\s+(\S+))?.*$</string>
+                <string>^\s*\#{1,}\s+(?:((@)name)\s+([^\s\.]+))$</string>
                 <key>captures</key>
                 <dict>
                     <key>1</key>
                     <dict>
                         <key>name</key>
-                        <string>storage.type.class.metadata</string>
+                        <string>entity.other.attribute-name</string>
                     </dict>
                     <key>2</key>
                     <dict>
@@ -140,21 +140,21 @@
                     <key>3</key>
                     <dict>
                         <key>name</key>
-                        <string>entity.name.type.instance.metadata</string>
+                        <string>entity.name.type.http</string>
                     </dict>
                 </dict>
                 <key>name</key>
-                <string>comment.source.sharp.http</string>
+                <string>comment.line.sharp.http</string>
             </dict>
             <dict>
                 <key>match</key>
-                <string>^\s*/{2,}\s*(?:((@)name)\s+(\S+))?.*$</string>
+                <string>^\s*\/{2,}\s+(?:((@)name)\s+([^\s\.]+))$</string>
                 <key>captures</key>
                 <dict>
                     <key>1</key>
                     <dict>
                         <key>name</key>
-                        <string>storage.type.class.metadata</string>
+                        <string>entity.other.attribute-name</string>
                     </dict>
                     <key>2</key>
                     <dict>
@@ -164,11 +164,61 @@
                     <key>3</key>
                     <dict>
                         <key>name</key>
-                        <string>entity.name.type.instance.metadata</string>
+                        <string>entity.name.type.http</string>
                     </dict>
                 </dict>
                 <key>name</key>
-                <string>comment.source.double-slash.http</string>
+                <string>comment.line.double-slash.http</string>
+            </dict>
+            <dict>
+                <key>match</key>
+                <string>^\s*\#{1,}\s+((@)note)\s*$</string>
+                <key>captures</key>
+                <dict>
+                    <key>1</key>
+                    <dict>
+                        <key>name</key>
+                        <string>entity.other.attribute-name</string>
+                    </dict>
+                    <key>2</key>
+                    <dict>
+                        <key>name</key>
+                        <string>punctuation.definition.block.tag.metadata</string>
+                    </dict>
+                </dict>
+                <key>name</key>
+                <string>comment.line.sharp.http</string>
+            </dict>
+            <dict>
+                <key>match</key>
+                <string>^\s*\/{2,}\s+((@)note)\s*$</string>
+                <key>captures</key>
+                <dict>
+                    <key>1</key>
+                    <dict>
+                        <key>name</key>
+                        <string>entity.other.attribute-name</string>
+                    </dict>
+                    <key>2</key>
+                    <dict>
+                        <key>name</key>
+                        <string>punctuation.definition.block.tag.metadata</string>
+                    </dict>
+                </dict>
+                <key>name</key>
+                <string>comment.line.double-slash.http</string>
+            </dict>
+            <dict>
+                <key>match</key>
+                <string>^\s*\#{1,}.*$</string>
+                <key>name</key>
+                <string>comment.line.sharp.http</string>
+            </dict>
+            <dict>
+                <key>match</key>
+                <string>^\s*\/{2,}.*$</string>
+                <key>name</key>
+                <string>comment.line.double-slash.http</string>
             </dict>
             <dict>
                 <key>captures</key>
@@ -190,9 +240,33 @@
                     </dict>
                 </dict>
                 <key>match</key>
-                <string>^\s*(@)([^\s=]+)\s*=\s*(.+)\s*$</string>
+                <string>^\s*(@)([^\s=]+)\s*=\s*(.*?)\s*$</string>
                 <key>name</key>
                 <string>http.filevariable</string>
+            </dict>
+            <dict>
+                <key>captures</key>
+                <dict>
+                    <key>1</key>
+                    <dict>
+                        <key>name</key>
+                        <string>keyword.operator.http</string>
+                    </dict>
+                    <key>2</key>
+                    <dict>
+                        <key>name</key>
+                        <string>variable.other.http</string>
+                    </dict>
+                    <key>3</key>
+                    <dict>
+                        <key>name</key>
+                        <string>string.other.http</string>
+                    </dict>
+                </dict>
+                <key>match</key>
+                <string>^\s*(\?|&)([^=\s]+)=(.*)$</string>
+                <key>name</key>
+                <string>http.query</string>
             </dict>
             <dict>
                 <key>captures</key>
@@ -229,16 +303,21 @@
                     <key>1</key>
                     <dict>
                         <key>name</key>
-                        <string>support.variable.http</string>
+                        <string>entity.name.tag.http</string>
                     </dict>
                     <key>2</key>
+                    <dict>
+                        <key>name</key>
+                        <string>keyword.other.http</string>
+                    </dict>
+                    <key>3</key>
                     <dict>
                         <key>name</key>
                         <string>string.other.http</string>
                     </dict>
                 </dict>
                 <key>match</key>
-                <string>^([\w\-]+)\s*\:\s*(.*?)\s*$</string>
+                <string>^([\w\-]+)\s*(\:)\s*(.*?)\s*$</string>
                 <key>name</key>
                 <string>http.requestheaders</string>
             </dict>

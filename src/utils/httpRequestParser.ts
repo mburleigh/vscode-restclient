@@ -1,198 +1,185 @@
-"use strict";
-
 import * as fs from 'fs-extra';
 import { EOL } from 'os';
-import * as path from 'path';
 import { Stream } from 'stream';
-import { Uri } from 'vscode';
-import { ArrayUtility } from '../common/arrayUtility';
-import { Headers } from '../models/base';
 import { RestClientSettings } from '../models/configurationSettings';
 import { FormParamEncodingStrategy } from '../models/formParamEncodingStrategy';
 import { HttpRequest } from '../models/httpRequest';
-import { IRequestParser } from '../models/IRequestParser';
+import { RequestParser } from '../models/requestParser';
 import { MimeUtility } from './mimeUtility';
-import { getHeader, removeHeader } from './misc';
+import { getContentType, getHeader, removeHeader } from './misc';
 import { RequestParserUtil } from './requestParserUtil';
-import { getWorkspaceRootPath } from './workspaceUtility';
 
 const CombinedStream = require('combined-stream');
 const encodeurl = require('encodeurl');
 
-export class HttpRequestParser implements IRequestParser {
+enum ParseState {
+    URL,
+    Header,
+    Body,
+}
+
+export class HttpRequestParser implements RequestParser {
     private readonly _restClientSettings: RestClientSettings = RestClientSettings.Instance;
     private static readonly defaultMethod = 'GET';
-    private static readonly uploadFromFileSyntax = /^<\s+(.+)\s*$/;
+    private static readonly queryStringLinePrefix = /^\s*[&\?]/;
+    private static readonly inputFileSyntax = /^<\s+(.+?)\s*$/;
 
-    public parseHttpRequest(requestRawText: string, requestAbsoluteFilePath: string): HttpRequest {
+    public constructor(private requestRawText: string) {
+    }
+
+    public async parseHttpRequest(name?: string): Promise<HttpRequest> {
         // parse follows http://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
         // split the request raw text into lines
-        let lines: string[] = requestRawText.split(EOL);
+        const lines: string[] = this.requestRawText.split(EOL);
+        const requestLines: string[] = [];
+        const headersLines: string[] = [];
+        const bodyLines: string[] = [];
+        const variableLines: string[] = [];
 
-        // skip leading empty lines
-        lines = ArrayUtility.skipWhile(lines, value => value.trim() === '');
-
-        // skip trailing empty lines
-        lines = ArrayUtility.skipWhile(lines.reverse(), value => value.trim() === '').reverse();
-
-        if (lines.length === 0) {
-            return null;
-        }
-
-        // parse request line
-        let requestLine = HttpRequestParser.parseRequestLine(lines[0]);
-
-        // get headers range
-        let headers: Headers;
-        let body: string | Stream;
-        let variables: string | Stream;
-        let bodyLines: string[] = [];
-        let variableLines: string[] = [];
-        let isGraphQlRequest: boolean = false;
-        let headerStartLine = ArrayUtility.firstIndexOf(lines, value => value.trim() !== '', 1);
-        if (headerStartLine !== -1) {
-            if (headerStartLine === 1) {
-                // parse request headers
-                let firstEmptyLine = ArrayUtility.firstIndexOf(lines, value => value.trim() === '', headerStartLine);
-                let headerEndLine = firstEmptyLine === -1 ? lines.length : firstEmptyLine;
-                let headerLines = lines.slice(headerStartLine, headerEndLine);
-                let index = 0;
-                let queryString = '';
-                for (; index < headerLines.length; ) {
-                    let headerLine = (headerLines[index]).trim();
-                    if (['?', '&'].includes(headerLine[0])) {
-                        queryString += headerLine;
-                        index++;
-                        continue;
+        let state = ParseState.URL;
+        let currentLine: string | undefined;
+        while ((currentLine = lines.shift()) !== undefined) {
+            const nextLine = lines[0];
+            switch (state) {
+                case ParseState.URL:
+                    requestLines.push(currentLine.trim());
+                    if (nextLine === undefined
+                        || HttpRequestParser.queryStringLinePrefix.test(nextLine)) {
+                        // request with request line only
+                    } else if (nextLine.trim()) {
+                        state = ParseState.Header;
+                    } else {
+                        // request with no headers but has body
+                        // remove the blank line before the body
+                        lines.shift();
+                        state = ParseState.Body;
                     }
                     break;
-                }
-
-                if (queryString !== '') {
-                    requestLine.url += queryString;
-                }
-                headers = RequestParserUtil.parseRequestHeaders(headerLines.slice(index));
-
-                // let underlying node.js module recalculate the content length
-                removeHeader(headers, 'content-length');
-
-                // get body range
-                const bodyStartLine = ArrayUtility.firstIndexOf(lines, value => value.trim() !== '', headerEndLine);
-                if (bodyStartLine !== -1) {
-                    const requestTypeHeader = getHeader(headers, 'x-request-type');
-                    const contentTypeHeader = getHeader(headers, 'content-type') || getHeader(this._restClientSettings.defaultHeaders, 'content-type');
-                    firstEmptyLine = ArrayUtility.firstIndexOf(lines, value => value.trim() === '', bodyStartLine);
-                    const bodyEndLine = MimeUtility.isMultiPart(contentTypeHeader) || firstEmptyLine === -1 ? lines.length : firstEmptyLine;
-                    bodyLines = lines.slice(bodyStartLine, bodyEndLine);
-                    if (requestTypeHeader && requestTypeHeader === 'GraphQL') {
-                        const variableStartLine = ArrayUtility.firstIndexOf(lines, value => value.trim() !== '', bodyEndLine);
-                        if (variableStartLine !== -1) {
-                            firstEmptyLine = ArrayUtility.firstIndexOf(lines, value => value.trim() === '', variableStartLine);
-                            variableLines = lines.slice(variableStartLine, firstEmptyLine === -1 ? lines.length : firstEmptyLine);
-                        }
-                        // a request don't necessarily need variables
-                        // to be considered a GraphQL request
-                        isGraphQlRequest = true;
-                        removeHeader(headers, 'x-request-type');
+                case ParseState.Header:
+                    headersLines.push(currentLine.trim());
+                    if (nextLine?.trim() === '') {
+                        // request with no headers but has body
+                        // remove the blank line before the body
+                        lines.shift();
+                        state = ParseState.Body;
                     }
-                }
-            } else {
-                // parse body, since no headers provided
-                const firstEmptyLine = ArrayUtility.firstIndexOf(lines, value => value.trim() === '', headerStartLine);
-                const bodyEndLine = firstEmptyLine === -1 ? lines.length : firstEmptyLine;
-                bodyLines = lines.slice(headerStartLine, bodyEndLine);
+                    break;
+                case ParseState.Body:
+                    bodyLines.push(currentLine);
+                    break;
             }
         }
 
-        // if Host header provided and url is relative path, change to absolute url
-        let host = getHeader(headers, 'Host') || getHeader(this._restClientSettings.defaultHeaders, 'host');
-        if (host && requestLine.url[0] === '/') {
-            let [, port] = host.split(':');
-            let scheme = port === '443' || port === '8443' ? 'https' : 'http';
-            requestLine.url = `${scheme}://${host}${requestLine.url}`;
+        // parse request line
+        const requestLine = HttpRequestParser.parseRequestLine(requestLines.join(EOL));
+
+        // parse headers lines
+        const headers = RequestParserUtil.parseRequestHeaders(headersLines);
+
+        // let underlying node.js library recalculate the content length
+        removeHeader(headers, 'content-length');
+
+        // check request type
+        const isGraphQlRequest = getHeader(headers, 'X-Request-Type') === 'GraphQL';
+        if (isGraphQlRequest) {
+            removeHeader(headers, 'X-Request-Type');
+
+            // a request doesn't necessarily need variables to be considered a GraphQL request
+            const firstEmptyLine = bodyLines.findIndex(value => value.trim() === '');
+            if (firstEmptyLine !== -1) {
+                variableLines.push(...bodyLines.splice(firstEmptyLine + 1));
+                bodyLines.pop();    // remove the empty line between body and variables
+            }
         }
 
-        // parse body
-        const contentTypeHeader = getHeader(headers, 'content-type') || getHeader(this._restClientSettings.defaultHeaders, 'content-type');
-        body = HttpRequestParser.parseRequestBody(bodyLines, requestAbsoluteFilePath, contentTypeHeader);
+        // parse body lines
+        const contentTypeHeader = getContentType(headers) || getContentType(this._restClientSettings.defaultHeaders);
+        let body = await HttpRequestParser.parseRequestBody(bodyLines, contentTypeHeader);
         if (isGraphQlRequest) {
-            variables = HttpRequestParser.parseRequestBody(variableLines, requestAbsoluteFilePath, contentTypeHeader);
+            const variables = await HttpRequestParser.parseRequestBody(variableLines, contentTypeHeader);
 
-            let graphQlPayload = {
+            const graphQlPayload = {
                 query: body,
                 variables: variables ? JSON.parse(variables.toString()) : {}
             };
             body = JSON.stringify(graphQlPayload);
-        } else if (this._restClientSettings.formParamEncodingStrategy !== FormParamEncodingStrategy.Never && body && typeof body === 'string' && MimeUtility.isFormUrlEncoded(contentTypeHeader)) {
+        } else if (this._restClientSettings.formParamEncodingStrategy !== FormParamEncodingStrategy.Never && typeof body === 'string' && MimeUtility.isFormUrlEncoded(contentTypeHeader)) {
             if (this._restClientSettings.formParamEncodingStrategy === FormParamEncodingStrategy.Always) {
                 const stringPairs = body.split('&');
-                const encodedStringParis = [];
+                const encodedStringPairs: string[] = [];
                 for (const stringPair of stringPairs) {
                     const [name, ...values] = stringPair.split('=');
-                    let value = values.join('=');
-                    encodedStringParis.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
+                    const value = values.join('=');
+                    encodedStringPairs.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
                 }
-                body = encodedStringParis.join('&');
+                body = encodedStringPairs.join('&');
             } else {
                 body = encodeurl(body);
             }
         }
 
-        return new HttpRequest(requestLine.method, requestLine.url, headers, body, bodyLines.join(EOL));
+        // if Host header provided and url is relative path, change to absolute url
+        const host = getHeader(headers, 'Host') || getHeader(this._restClientSettings.defaultHeaders, 'host');
+        if (host && requestLine.url[0] === '/') {
+            const [, port] = host.toString().split(':');
+            const scheme = port === '443' || port === '8443' ? 'https' : 'http';
+            requestLine.url = `${scheme}://${host}${requestLine.url}`;
+        }
+
+        return new HttpRequest(requestLine.method, requestLine.url, headers, body, bodyLines.join(EOL), name);
     }
 
     private static parseRequestLine(line: string): { method: string, url: string } {
         // Request-Line = Method SP Request-URI SP HTTP-Version CRLF
-        let words = line.split(' ').filter(Boolean);
+        const words = line.split(' ').filter(Boolean);
 
         let method: string;
         let url: string;
         if (words.length === 1) {
             // Only provides request url
-            method = HttpRequestParser.defaultMethod;
+            method = this.defaultMethod;
             url = words[0];
         } else {
             // Provides both request method and url
-            method = words.shift();
+            method = words.shift()!;
             url = line.trim().substring(method.length).trim();
-            let match = words[words.length - 1].match(/HTTP\/.*/gi);
-            if (match) {
+            if (/^HTTP\/.*$/i.test(words[words.length - 1])) {
                 url = url.substring(0, url.lastIndexOf(words[words.length - 1])).trim();
             }
         }
 
-        return {
-            method: method,
-            url: url
-        };
+        return { method, url };
     }
 
-    private static parseRequestBody(lines: string[], requestFileAbsolutePath: string, contentTypeHeader: string): string | Stream {
-        if (!lines || lines.length === 0) {
-            return null;
+    private static async parseRequestBody(lines: string[], contentTypeHeader: string | undefined): Promise<string | Stream | undefined> {
+        if (lines.length === 0) {
+            return undefined;
         }
 
         // Check if needed to upload file
-        if (lines.every(line => !HttpRequestParser.uploadFromFileSyntax.test(line))) {
+        if (lines.every(line => !this.inputFileSyntax.test(line))) {
             if (MimeUtility.isFormUrlEncoded(contentTypeHeader)) {
                 return lines.reduce((p, c, i) => {
                     p += `${(i === 0 || c.startsWith('&') ? '' : EOL)}${c}`;
                     return p;
                 }, '');
-            } else if (MimeUtility.isNewlineDelimitedJSON(contentTypeHeader)) {
-                return lines.join(EOL) + EOL;
             } else {
-                return lines.join(EOL);
+                const lineEnding = this.getLineEnding(contentTypeHeader);
+                let result = lines.join(lineEnding);
+                if (MimeUtility.isNewlineDelimitedJSON(contentTypeHeader)) {
+                    result += lineEnding;
+                }
+                return result;
             }
         } else {
             const combinedStream = CombinedStream.create({ maxDataSize: 10 * 1024 * 1024 });
             for (const [index, line] of lines.entries()) {
-                if (HttpRequestParser.uploadFromFileSyntax.test(line)) {
-                    let groups = HttpRequestParser.uploadFromFileSyntax.exec(line);
-                    if (groups !== null && groups.length === 2) {
-                        let fileUploadPath = groups[1];
-                        let fileAbsolutePath = HttpRequestParser.resolveFilePath(fileUploadPath, requestFileAbsolutePath);
-                        if (fileAbsolutePath && fs.existsSync(fileAbsolutePath)) {
+                if (this.inputFileSyntax.test(line)) {
+                    const groups = this.inputFileSyntax.exec(line);
+                    if (groups?.length === 2) {
+                        const inputFilePath = groups[1];
+                        const fileAbsolutePath = await RequestParserUtil.resolveRequestBodyPath(inputFilePath);
+                        if (fileAbsolutePath) {
                             combinedStream.append(fs.createReadStream(fileAbsolutePath));
                         } else {
                             combinedStream.append(line);
@@ -203,7 +190,7 @@ export class HttpRequestParser implements IRequestParser {
                 }
 
                 if (index !== lines.length - 1) {
-                    combinedStream.append(HttpRequestParser.getLineEnding(contentTypeHeader));
+                    combinedStream.append(this.getLineEnding(contentTypeHeader));
                 }
             }
 
@@ -211,29 +198,7 @@ export class HttpRequestParser implements IRequestParser {
         }
     }
 
-    private static getLineEnding(contentTypeHeader: string) {
+    private static getLineEnding(contentTypeHeader: string | undefined) {
         return MimeUtility.isMultiPartFormData(contentTypeHeader) ? '\r\n' : EOL;
-    }
-
-    private static resolveFilePath(refPath: string, httpFilePath: string): string {
-        if (path.isAbsolute(refPath)) {
-            return fs.existsSync(refPath) ? refPath : null;
-        }
-
-        let absolutePath;
-        let rootPath = getWorkspaceRootPath();
-        if (rootPath) {
-            absolutePath = path.join(Uri.parse(rootPath).fsPath, refPath);
-            if (fs.existsSync(absolutePath)) {
-                return absolutePath;
-            }
-        }
-
-        absolutePath = path.join(path.dirname(httpFilePath), refPath);
-        if (fs.existsSync(absolutePath)) {
-            return absolutePath;
-        }
-
-        return null;
     }
 }

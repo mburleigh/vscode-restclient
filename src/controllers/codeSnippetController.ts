@@ -1,50 +1,41 @@
-"use strict";
-
 import { EOL } from 'os';
 import * as url from 'url';
-import { Clipboard, env, QuickInputButtons, QuickPickItem, window } from 'vscode';
-import { ArrayUtility } from "../common/arrayUtility";
-import * as Constants from '../common/constants';
+import { Clipboard, env, ExtensionContext, QuickInputButtons, window } from 'vscode';
+import Logger from '../logger';
 import { HARCookie, HARHeader, HARHttpRequest, HARPostData } from '../models/harHttpRequest';
 import { HttpRequest } from '../models/httpRequest';
 import { RequestParserFactory } from '../models/requestParserFactory';
 import { trace } from "../utils/decorator";
+import { base64 } from '../utils/misc';
 import { Selector } from '../utils/selector';
 import { Telemetry } from '../utils/telemetry';
-import { VariableProcessor } from '../utils/variableProcessor';
 import { getCurrentTextDocument } from '../utils/workspaceUtility';
 import { CodeSnippetWebview } from '../views/codeSnippetWebview';
 
 const encodeUrl = require('encodeurl');
 const HTTPSnippet = require('httpsnippet');
 
-interface CodeSnippetTargetQuickPickItem extends QuickPickItem {
-    target: {
-        key: string;
-        title: string;
-        clients: [{
-            title: string;
-            link: string,
-            description: string
-        }]
-    };
-}
+type CodeSnippetClient = {
+    key: string;
+    title: string;
+    link: string;
+    description: string;
+};
 
-interface CodeSnippetClientQuickPickItem extends CodeSnippetTargetQuickPickItem {
-    client: {
-        key: string;
-        title: string;
-    };
-}
+type CodeSnippetTarget = {
+    key: string;
+    title: string;
+    clients: CodeSnippetClient[];
+};
 
 export class CodeSnippetController {
-    private static _availableTargets = HTTPSnippet.availableTargets();
+    private readonly _availableTargets: CodeSnippetTarget[] = HTTPSnippet.availableTargets();
     private readonly clipboard: Clipboard;
     private _convertedResult;
     private _webview: CodeSnippetWebview;
 
-    constructor() {
-        this._webview = new CodeSnippetWebview();
+    constructor(context: ExtensionContext) {
+        this._webview = new CodeSnippetWebview(context);
         this.clipboard = env.clipboard;
     }
 
@@ -55,82 +46,65 @@ export class CodeSnippetController {
             return;
         }
 
-        // Get selected text of selected lines or full document
-        let selectedText = Selector.getRequestText(editor);
-        if (!selectedText) {
+        const selectedRequest = await Selector.getRequest(editor);
+        if (!selectedRequest) {
             return;
         }
 
-        // remove comment lines
-        let lines: string[] = selectedText.split(Constants.LineSplitterRegex).filter(l => !Constants.CommentIdentifiersRegex.test(l));
-        if (lines.length === 0 || lines.every(line => line === '')) {
-            return;
-        }
-
-        // remove file variables definition lines and leading empty lines
-        selectedText = ArrayUtility.skipWhile(lines, l => Constants.FileVariableDefinitionRegex.test(l) || l.trim() === '').join(EOL);
-
-        // variables replacement
-        selectedText = await VariableProcessor.processRawRequest(selectedText);
+        const { text } = selectedRequest;
 
         // parse http request
-        let httpRequest = new RequestParserFactory().createRequestParser(selectedText).parseHttpRequest(selectedText, document.fileName);
-        if (!httpRequest) {
-            return;
-        }
+        const httpRequest = await RequestParserFactory.createRequestParser(text).parseHttpRequest();
 
-        let harHttpRequest = this.convertToHARHttpRequest(httpRequest);
-        let snippet = new HTTPSnippet(harHttpRequest);
+        const harHttpRequest = this.convertToHARHttpRequest(httpRequest);
+        const snippet = new HTTPSnippet(harHttpRequest);
 
-        if (CodeSnippetController._availableTargets) {
-            const quickPick = window.createQuickPick();
-            const targetQuickPickItems: CodeSnippetTargetQuickPickItem[] = CodeSnippetController._availableTargets.map(target => ({ label: target.title, target }));
-            quickPick.title = 'Generate Code Snippet';
-            quickPick.step = 1;
-            quickPick.totalSteps = 2;
+        let target: Pick<CodeSnippetTarget, 'key' | 'title'> | undefined = undefined;
+
+        const quickPick = window.createQuickPick();
+        const targetQuickPickItems = this._availableTargets.map(target => ({ label: target.title, ...target }));
+        quickPick.title = 'Generate Code Snippet';
+        quickPick.step = 1;
+        quickPick.totalSteps = 2;
+        quickPick.items = targetQuickPickItems;
+        quickPick.matchOnDescription = true;
+        quickPick.matchOnDetail = true;
+        quickPick.onDidHide(() => quickPick.dispose());
+        quickPick.onDidTriggerButton(() => {
+            quickPick.step!--;
+            quickPick.buttons = [];
             quickPick.items = targetQuickPickItems;
-            quickPick.matchOnDescription = true;
-            quickPick.matchOnDetail = true;
-            quickPick.onDidHide(() => quickPick.dispose());
-            quickPick.onDidTriggerButton(() => {
-                quickPick.step--;
-                quickPick.buttons = [];
-                quickPick.items = targetQuickPickItems;
-            });
-            quickPick.onDidAccept(() => {
-                const selectedItem = quickPick.selectedItems[0];
-                if (selectedItem) {
-                    if (quickPick.step === 1) {
-                        quickPick.step++;
-                        quickPick.buttons = [QuickInputButtons.Back];
-                        const targetItem = selectedItem as CodeSnippetTargetQuickPickItem;
-                        quickPick.items = targetItem.target.clients.map(
-                            client => ({
-                                label: client.title,
-                                description: client.description,
-                                detail: client.link,
-                                target: targetItem.target,
-                                client
-                            })
-                        );
-                    } else if (quickPick.step === 2) {
-                        const { target: { key: tk, title: tt }, client: { key: ck, title: ct } } = (selectedItem as CodeSnippetClientQuickPickItem);
-                        Telemetry.sendEvent('Generate Code Snippet', { 'target': tk, 'client': ck });
-                        let result = snippet.convert(tk, ck);
-                        this._convertedResult = result;
+            target = undefined;
+        });
+        quickPick.onDidAccept(() => {
+            const selectedItem = quickPick.selectedItems[0];
+            if (quickPick.step === 1) {
+                quickPick.step++;
+                quickPick.buttons = [QuickInputButtons.Back];
+                target = selectedItem as any as CodeSnippetTarget;
+                quickPick.items = (target as CodeSnippetTarget).clients.map(
+                    client => ({
+                        label: client.title,
+                        detail: client.link,
+                        ...client
+                    })
+                );
+            } else if (quickPick.step === 2) {
+                const { key: ck, title: ct } = selectedItem as any as CodeSnippetClient;
+                const { key: tk, title: tt } = target!;
+                Telemetry.sendEvent('Generate Code Snippet', { 'target': target!.key, 'client': ck });
+                const result = snippet.convert(tk, ck);
+                this._convertedResult = result;
 
-                        try {
-                            this._webview.render(result, `${tt}-${ct}`, tk);
-                        } catch (reason) {
-                            window.showErrorMessage(reason);
-                        }
-                    }
+                try {
+                    this._webview.render(result, `${tt}-${ct}`, tk);
+                } catch (reason) {
+                    Logger.error('Unable to preview generated code snippet:', reason);
+                    window.showErrorMessage(reason);
                 }
-            });
-            quickPick.show();
-        } else {
-            window.showInformationMessage('No available code snippet convert targets');
-        }
+            }
+        });
+        quickPick.show();
     }
 
     @trace('Copy Code Snippet')
@@ -148,29 +122,15 @@ export class CodeSnippetController {
             return;
         }
 
-        // Get selected text of selected lines or full document
-        let selectedText = Selector.getRequestText(editor);
-        if (!selectedText) {
+        const selectedRequest = await Selector.getRequest(editor);
+        if (!selectedRequest) {
             return;
         }
 
-        // remove comment lines
-        let lines: string[] = selectedText.split(Constants.LineSplitterRegex).filter(l => !Constants.CommentIdentifiersRegex.test(l));
-        if (lines.length === 0 || lines.every(line => line === '')) {
-            return;
-        }
-
-        // remove file variables definition lines
-        selectedText = ArrayUtility.skipWhile(lines, l => Constants.FileVariableDefinitionRegex.test(l) || l.trim() === '').join(EOL);
-
-        // variables replacement
-        selectedText = await VariableProcessor.processRawRequest(selectedText);
+        const { text } = selectedRequest;
 
         // parse http request
-        const httpRequest = new RequestParserFactory().createRequestParser(selectedText).parseHttpRequest(selectedText, document.fileName);
-        if (!httpRequest) {
-            return;
-        }
+        const httpRequest = await RequestParserFactory.createRequestParser(text).parseHttpRequest();
 
         const harHttpRequest = this.convertToHARHttpRequest(httpRequest);
         const addPrefix = !(url.parse(harHttpRequest.url).protocol);
@@ -189,38 +149,41 @@ export class CodeSnippetController {
 
     private convertToHARHttpRequest(request: HttpRequest): HARHttpRequest {
         // convert headers
-        let headers: HARHeader[] = [];
-        for (let key in request.headers) {
-            let headerValue = request.headers[key];
-            if (key.toLowerCase() === 'authorization') {
-                headerValue = CodeSnippetController.normalizeAuthHeader(headerValue);
+        const headers: HARHeader[] = [];
+        for (const key in request.headers) {
+            const headerValue = request.headers[key];
+            if (!headerValue) {
+                continue;
             }
-            headers.push(new HARHeader(key, headerValue));
+            const headerValues = Array.isArray(headerValue) ? headerValue : [headerValue.toString()];
+            for (let value of headerValues) {
+                if (key.toLowerCase() === 'authorization') {
+                    value = CodeSnippetController.normalizeAuthHeader(value);
+                }
+                headers.push(new HARHeader(key, value));
+            }
         }
 
         // convert cookie headers
-        let cookies: HARCookie[] = [];
-        let cookieHeader = headers.find(header => header.name.toLowerCase() === 'cookie');
+        const cookies: HARCookie[] = [];
+        const cookieHeader = headers.find(header => header.name.toLowerCase() === 'cookie');
         if (cookieHeader) {
             cookieHeader.value.split(';').forEach(pair => {
-                let [headerName, headerValue = ''] = pair.split('=', 2);
+                const [headerName, headerValue = ''] = pair.split('=', 2);
                 cookies.push(new HARCookie(headerName.trim(), headerValue.trim()));
             });
         }
 
         // convert body
-        let body: HARPostData = null;
+        let body: HARPostData | undefined;
         if (request.body) {
-            let contentTypeHeader = headers.find(header => header.name.toLowerCase() === 'content-type');
-            let mimeType: string;
-            if (contentTypeHeader) {
-                mimeType = contentTypeHeader.value;
-            }
+            const contentTypeHeader = headers.find(header => header.name.toLowerCase() === 'content-type');
+            const mimeType: string = contentTypeHeader?.value ?? 'application/json';
             if (typeof request.body === 'string') {
-                let normalizedBody = request.body.split(EOL).reduce((prev, cur) => prev.concat(cur.trim()), '');
+                const normalizedBody = request.body.split(EOL).reduce((prev, cur) => prev.concat(cur.trim()), '');
                 body = new HARPostData(mimeType, normalizedBody);
             } else {
-                body = new HARPostData(mimeType, request.rawBody);
+                body = new HARPostData(mimeType, request.rawBody!);
             }
         }
 
@@ -231,14 +194,14 @@ export class CodeSnippetController {
         this._webview.dispose();
     }
 
-    private static normalizeAuthHeader(authHeader) {
+    private static normalizeAuthHeader(authHeader: string) {
         if (authHeader) {
-            let start = authHeader.indexOf(' ');
-            let scheme = authHeader.substr(0, start);
-            if (scheme && scheme.toLowerCase() === 'basic') {
-                let params = authHeader.substr(start).trim().split(' ');
+            const start = authHeader.indexOf(' ');
+            const scheme = authHeader.substr(0, start);
+            if (scheme.toLowerCase() === 'basic') {
+                const params = authHeader.substr(start).trim().split(' ');
                 if (params.length === 2) {
-                    return 'Basic ' + Buffer.from(`${params[0]}:${params[1]}`).toString('base64');
+                    return `Basic ${base64(`${params[0]}:${params[1]}`)}`;
                 }
             }
         }

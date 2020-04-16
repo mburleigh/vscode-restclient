@@ -1,6 +1,4 @@
-'use strict';
-
-import { commands, ViewColumn, WebviewPanel, window } from 'vscode';
+import { ExtensionContext, ViewColumn, WebviewPanel, window } from 'vscode';
 import { disposeAll } from '../utils/dispose';
 import { BaseWebview } from './baseWebview';
 
@@ -9,14 +7,16 @@ const codeHighlightLinenums = require('code-highlight-linenums');
 
 export class CodeSnippetWebview extends BaseWebview {
 
-    private readonly codeSnippetPreviewActiveContextKey = 'codeSnippetPreviewFocus';
-
     protected get viewType(): string {
         return 'rest-code-snippet';
     }
 
-    public constructor() {
-        super();
+    protected get previewActiveContextKey(): string {
+        return 'codeSnippetPreviewFocus';
+    }
+
+    public constructor(context: ExtensionContext) {
+        super(context);
     }
 
     public async render(convertResult: string, title: string, lang: string) {
@@ -28,29 +28,30 @@ export class CodeSnippetWebview extends BaseWebview {
                 ViewColumn.Two,
                 {
                     enableFindWidget: true,
-                    retainContextWhenHidden: true,
-                    localResourceRoots: [ this.styleFolderPath ]
+                    retainContextWhenHidden: true
                 });
 
-                panel.onDidDispose(() => {
-                    commands.executeCommand('setContext', this.codeSnippetPreviewActiveContextKey, false);
-                    this.panels.pop();
-                    this._onDidCloseAllWebviewPanels.fire();
-                });
+            panel.onDidDispose(() => {
+                this.setPrviewActiveContext(false);
+                this.panels.pop();
+                this._onDidCloseAllWebviewPanels.fire();
+            });
 
-                panel.onDidChangeViewState(({ webviewPanel }) => {
-                    commands.executeCommand('setContext', this.codeSnippetPreviewActiveContextKey, webviewPanel.visible);
-                });
+            panel.onDidChangeViewState(({ webviewPanel }) => {
+                this.setPrviewActiveContext(webviewPanel.active);
+            });
 
-                this.panels.push(panel);
+            panel.iconPath = this.iconFilePath;
+
+            this.panels.push(panel);
         } else {
             panel = this.panels[0];
             panel.title = title;
         }
 
-        panel.webview.html = this.getHtmlForWebview(convertResult, lang);
+        panel.webview.html = this.getHtmlForWebview(panel, convertResult, lang);
 
-        commands.executeCommand('setContext', this.codeSnippetPreviewActiveContextKey, true);
+        this.setPrviewActiveContext(true);
 
         panel.reveal(ViewColumn.Two);
     }
@@ -59,11 +60,11 @@ export class CodeSnippetWebview extends BaseWebview {
         disposeAll(this.panels);
     }
 
-    private getHtmlForWebview(convertResult: string, lang: string): string {
+    private getHtmlForWebview(panel: WebviewPanel, convertResult: string, lang: string): string {
         const csp = this.getCsp();
         return `
             <head>
-                <link rel="stylesheet" href="${this.styleFilePath}">
+                <link rel="stylesheet" href="${panel.webview.asWebviewUri(this.styleFilePath)}">
                 ${csp}
             </head>
             <body>

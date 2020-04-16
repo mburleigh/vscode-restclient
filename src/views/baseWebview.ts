@@ -1,8 +1,5 @@
-'use strict';
-
 import * as path from 'path';
-import { Event, EventEmitter, extensions, Uri, WebviewPanel } from 'vscode';
-import * as Constants from '../common/constants';
+import { commands, Event, EventEmitter, ExtensionContext, Uri, WebviewPanel } from 'vscode';
 import { RestClientSettings } from '../models/configurationSettings';
 
 export abstract class BaseWebview {
@@ -11,32 +8,29 @@ export abstract class BaseWebview {
 
     protected readonly settings: RestClientSettings = RestClientSettings.Instance;
 
-    protected readonly extensionPath: string;
-
-    protected readonly styleFolderPath: Uri;
-
     protected readonly styleFilePath: Uri;
-
-    protected readonly scriptFolderPath: Uri;
 
     protected readonly scriptFilePath: Uri;
 
-    protected panels: WebviewPanel[];
+    protected readonly iconFilePath: Uri;
 
-    protected constructor() {
-        this.extensionPath = extensions.getExtension(Constants.ExtensionId).extensionPath;
-        this.panels = [];
-        this.styleFilePath = Uri.file(path.join(this.extensionPath, Constants.CSSFolderName, Constants.CSSFileName))
-            .with({ scheme: 'vscode-resource' });
-        this.styleFolderPath = Uri.file(path.join(this.extensionPath, Constants.CSSFolderName));
-        this.scriptFilePath = Uri.file(path.join(this.extensionPath, Constants.ScriptsFolderName, Constants.ScriptFileName))
-            .with({ scheme: 'vscode-resource' });
-        this.scriptFolderPath = Uri.file(path.join(this.extensionPath, Constants.ScriptsFolderName));
+    protected panels: WebviewPanel[] = [];
+
+    protected constructor(protected readonly context: ExtensionContext) {
+        this.styleFilePath = Uri.file(this.context.asAbsolutePath(path.join('styles', 'rest-client.css')));
+        this.scriptFilePath = Uri.file(this.context.asAbsolutePath(path.join('scripts', 'main.js')));
+        this.iconFilePath = Uri.file(this.context.asAbsolutePath(path.join('images', 'rest_icon.png')));
     }
 
     public get onDidCloseAllWebviewPanels(): Event<void> {
         return this._onDidCloseAllWebviewPanels.event;
     }
 
+    protected setPrviewActiveContext(value: boolean) {
+        commands.executeCommand('setContext', this.previewActiveContextKey, value);
+    }
+
     protected abstract get viewType(): string;
+
+    protected abstract get previewActiveContextKey(): string;
 }

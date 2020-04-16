@@ -1,24 +1,22 @@
-"use strict";
-
 import * as fs from 'fs-extra';
-import * as path from 'path';
-import { Uri } from 'vscode';
-import { Headers } from '../models/base';
+import { RequestHeaders } from '../models/base';
 import { HttpRequest } from '../models/httpRequest';
-import { IRequestParser } from '../models/IRequestParser';
-import { hasHeader } from './misc';
+import { RequestParser } from '../models/requestParser';
+import { base64, hasHeader } from './misc';
 import { RequestParserUtil } from './requestParserUtil';
-import { getWorkspaceRootPath } from './workspaceUtility';
 
 const yargsParser = require('yargs-parser');
 
 const DefaultContentType: string = 'application/x-www-form-urlencoded';
 
-export class CurlRequestParser implements IRequestParser {
+export class CurlRequestParser implements RequestParser {
 
-    public parseHttpRequest(requestRawText: string, requestAbsoluteFilePath: string): HttpRequest {
+    public constructor(private requestRawText: string) {
+    }
+
+    public async parseHttpRequest(name?: string): Promise<HttpRequest> {
         let requestText = CurlRequestParser.mergeMultipleSpacesIntoSingle(
-            CurlRequestParser.mergeIntoSingleLine(requestRawText.trim()));
+            CurlRequestParser.mergeIntoSingleLine(this.requestRawText.trim()));
         requestText = requestText
             .replace(/(-X)(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE)/, '$1 $2')
             .replace(/(-I|--head)(?=\s+)/, '-X HEAD');
@@ -31,7 +29,7 @@ export class CurlRequestParser implements IRequestParser {
         }
 
         // parse header
-        let headers: Headers = {};
+        let headers: RequestHeaders = {};
         let parsedHeaders = parsedArguments.H || parsedArguments.header;
         if (parsedHeaders) {
             if (!Array.isArray(parsedHeaders)) {
@@ -41,15 +39,15 @@ export class CurlRequestParser implements IRequestParser {
         }
 
         // parse cookie
-        let cookieString: string = parsedArguments.b || parsedArguments.cookie;
-        if (cookieString && cookieString.includes('=')) {
+        const cookieString: string = parsedArguments.b || parsedArguments.cookie;
+        if (cookieString?.includes('=')) {
             // Doesn't support cookie jar
             headers['Cookie'] = cookieString;
         }
 
-        let user = parsedArguments.u || parsedArguments.user;
+        const user = parsedArguments.u || parsedArguments.user;
         if (user) {
-            headers['Authorization'] = `Basic ${Buffer.from(user).toString('base64')}`;
+            headers['Authorization'] = `Basic ${base64(user)}`;
         }
 
         // parse body
@@ -59,8 +57,8 @@ export class CurlRequestParser implements IRequestParser {
         }
 
         if (typeof body === 'string' && body[0] === '@') {
-            let fileAbsolutePath = CurlRequestParser.resolveFilePath(body.substring(1), requestAbsoluteFilePath);
-            if (fileAbsolutePath && fs.existsSync(fileAbsolutePath)) {
+            const fileAbsolutePath = await RequestParserUtil.resolveRequestBodyPath(body.substring(1));
+            if (fileAbsolutePath) {
                 body = fs.createReadStream(fileAbsolutePath);
             } else {
                 body = body.substring(1);
@@ -73,34 +71,12 @@ export class CurlRequestParser implements IRequestParser {
         }
 
         // parse method
-        let method: string = <string>(parsedArguments.X || parsedArguments.request);
+        let method: string = (parsedArguments.X || parsedArguments.request) as string;
         if (!method) {
             method = body ? "POST" : "GET";
         }
 
-        return new HttpRequest(method, url, headers, body, body);
-    }
-
-    private static resolveFilePath(refPath: string, httpFilePath: string): string {
-        if (path.isAbsolute(refPath)) {
-            return fs.existsSync(refPath) ? refPath : null;
-        }
-
-        let rootPath = getWorkspaceRootPath();
-        let absolutePath;
-        if (rootPath) {
-            absolutePath = path.join(Uri.parse(rootPath).fsPath, refPath);
-            if (fs.existsSync(absolutePath)) {
-                return absolutePath;
-            }
-        }
-
-        absolutePath = path.join(path.dirname(httpFilePath), refPath);
-        if (fs.existsSync(absolutePath)) {
-            return absolutePath;
-        }
-
-        return null;
+        return new HttpRequest(method, url, headers, body, body, name);
     }
 
     private static mergeIntoSingleLine(text: string): string {

@@ -1,22 +1,17 @@
-"use strict";
-
 import { CurlRequestParser } from '../utils/curlRequestParser';
 import { HttpRequestParser } from '../utils/httpRequestParser';
-import { IRequestParser } from './IRequestParser';
+import { RequestParser } from './requestParser';
 
-export interface IRequestParserFactory {
-    createRequestParser(rawHttpRequest: string): IRequestParser;
-}
 
-export class RequestParserFactory implements IRequestParserFactory {
+export class RequestParserFactory {
 
     private static readonly curlRegex: RegExp = /^\s*curl/i;
 
-    public createRequestParser(rawHttpRequest: string): IRequestParser {
+    public static createRequestParser(rawHttpRequest: string): RequestParser {
         if (RequestParserFactory.curlRegex.test(rawHttpRequest)) {
-            return new CurlRequestParser();
+            return new CurlRequestParser(rawHttpRequest);
         } else {
-            return new HttpRequestParser();
+            return new HttpRequestParser(rawHttpRequest);
         }
     }
 }

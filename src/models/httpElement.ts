@@ -1,12 +1,8 @@
-"use strict";
-
 import { MarkdownString, SnippetString } from 'vscode';
 
 export class HttpElement {
 
-    public text: string | SnippetString;
-
-    public constructor(public name: string, public type: ElementType, public prefix: string = null, public description: string | MarkdownString = null, text: string | SnippetString = null) {
+    public constructor(public name: string, public type: ElementType, public prefix?: string | null, public description?: string | MarkdownString, public text?: string | SnippetString) {
         this.text = text;
         if (!this.text) {
             this.text = name;
@@ -18,7 +14,7 @@ export class HttpElement {
             } else if (type === ElementType.Method) {
                 this.text = `${this.text} `;
             }
-            this.text = this.text.replace(/[\{\}]/g, "\\$&");
+            this.text = this.text.replace(/[{}]/g, "\\$&");
         }
 
         if (type === ElementType.SystemVariable) {

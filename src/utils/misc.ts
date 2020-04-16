@@ -1,22 +1,28 @@
-"use strict";
-
 import * as crypto from 'crypto';
-import { Headers } from '../models/base';
+import { RequestHeaders, RequestHeaderValue, ResponseHeaders, ResponseHeaderValue } from '../models/base';
 
-export function getHeader(headers: Headers, name: string): string {
+
+export function getHeader(headers: ResponseHeaders, name: string): ResponseHeaderValue;
+export function getHeader(headers: RequestHeaders, name: string): RequestHeaderValue;
+export function getHeader(headers: RequestHeaders | ResponseHeaders, name: string): RequestHeaderValue | ResponseHeaderValue {
     if (!headers || !name) {
-        return null;
+        return undefined;
     }
 
     const headerName = Object.keys(headers).find(h => h.toLowerCase() === name.toLowerCase());
     return headerName && headers[headerName];
 }
 
-export function hasHeader(headers: Headers, name: string): boolean {
+export function getContentType(headers: RequestHeaders | ResponseHeaders): string | undefined {
+    const value = getHeader(headers, 'content-type');
+    return value?.toString();
+}
+
+export function hasHeader(headers: RequestHeaders | ResponseHeaders, name: string): boolean {
     return !!(headers && name && Object.keys(headers).some(h => h.toLowerCase() === name.toLowerCase()));
 }
 
-export function removeHeader(headers: Headers, name: string) {
+export function removeHeader(headers: RequestHeaders | ResponseHeaders, name: string) {
     if (!headers || !name) {
         return;
     }
@@ -27,8 +33,13 @@ export function removeHeader(headers: Headers, name: string) {
     }
 }
 
-export function calculateMD5Hash(text: string | Buffer): string {
+export function md5(text: string | Buffer): string {
     return crypto.createHash('md5').update(text).digest('hex');
+}
+
+export function base64(text: string | Buffer): string {
+    const buffer = Buffer.isBuffer(text) ? text : Buffer.from(text);
+    return buffer.toString('base64');
 }
 
 export function isJSONString(text: string): boolean {

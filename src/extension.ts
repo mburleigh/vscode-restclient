@@ -6,8 +6,6 @@ import { CodeSnippetController } from './controllers/codeSnippetController';
 import { EnvironmentController } from './controllers/environmentController';
 import { HistoryController } from './controllers/historyController';
 import { RequestController } from './controllers/requestController';
-import { ResponseController } from './controllers/responseController';
-import { Logger } from './logger';
 import { CustomVariableDiagnosticsProvider } from "./providers/customVariableDiagnosticsProvider";
 import { RequestBodyDocumentLinkProvider } from './providers/documentLinkProvider';
 import { EnvironmentOrFileVariableHoverProvider } from './providers/environmentOrFileVariableHoverProvider';
@@ -22,20 +20,19 @@ import { RequestVariableDefinitionProvider } from './providers/requestVariableDe
 import { RequestVariableHoverProvider } from './providers/requestVariableHoverProvider';
 import { AadTokenCache } from './utils/aadTokenCache';
 import { ConfigurationDependentRegistration } from './utils/dependentRegistration';
+import { UserDataManager } from './utils/userDataManager';
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export async function activate(context: ExtensionContext) {
-    const logger = new Logger();
+    await UserDataManager.initialize();
 
-    let requestController = new RequestController(context, logger);
-    let historyController = new HistoryController(logger);
-    let responseController = new ResponseController();
-    let codeSnippetController = new CodeSnippetController();
-    let environmentController = new EnvironmentController(await EnvironmentController.getCurrentEnvironment());
+    const requestController = new RequestController(context);
+    const historyController = new HistoryController();
+    const codeSnippetController = new CodeSnippetController(context);
+    const environmentController = await EnvironmentController.create();
     context.subscriptions.push(requestController);
     context.subscriptions.push(historyController);
-    context.subscriptions.push(responseController);
     context.subscriptions.push(codeSnippetController);
     context.subscriptions.push(environmentController);
     context.subscriptions.push(commands.registerCommand('rest-client.request', ((document: TextDocument, range: Range) => requestController.run(range))));
@@ -43,9 +40,6 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(commands.registerCommand('rest-client.cancel-request', () => requestController.cancel()));
     context.subscriptions.push(commands.registerCommand('rest-client.history', () => historyController.save()));
     context.subscriptions.push(commands.registerCommand('rest-client.clear-history', () => historyController.clear()));
-    context.subscriptions.push(commands.registerCommand('rest-client.save-response', () => responseController.save()));
-    context.subscriptions.push(commands.registerCommand('rest-client.save-response-body', () => responseController.saveBody()));
-    context.subscriptions.push(commands.registerCommand('rest-client.copy-response-body', () => responseController.copyBody()));
     context.subscriptions.push(commands.registerCommand('rest-client.generate-codesnippet', () => codeSnippetController.run()));
     context.subscriptions.push(commands.registerCommand('rest-client.copy-codesnippet', () => codeSnippetController.copy()));
     context.subscriptions.push(commands.registerCommand('rest-client.copy-request-as-curl', () => codeSnippetController.copyAsCurl()));
@@ -80,10 +74,8 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(languages.registerReferenceProvider(documentSelector, new FileVariableReferenceProvider()));
     context.subscriptions.push(languages.registerDocumentSymbolProvider(documentSelector, new HttpDocumentSymbolProvider()));
 
-    const diagnosticsProviders = new CustomVariableDiagnosticsProvider();
-    workspace.onDidOpenTextDocument(diagnosticsProviders.checkVariables, diagnosticsProviders, context.subscriptions);
-    workspace.onDidCloseTextDocument(diagnosticsProviders.deleteDocumentFromDiagnosticCollection, diagnosticsProviders, context.subscriptions);
-    workspace.onDidSaveTextDocument(diagnosticsProviders.checkVariables, diagnosticsProviders, context.subscriptions);
+    const diagnosticsProvider = new CustomVariableDiagnosticsProvider();
+    context.subscriptions.push(diagnosticsProvider);
 }
 
 // this method is called when your extension is deactivated

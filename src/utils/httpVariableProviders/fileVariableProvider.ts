@@ -1,10 +1,8 @@
-'use strict';
-
 import { TextDocument } from 'vscode';
 import * as Constants from '../../common/constants';
+import { DocumentCache } from '../../models/documentCache';
 import { ResolveErrorMessage } from '../../models/httpVariableResolveResult';
 import { VariableType } from '../../models/variableType';
-import { calculateMD5Hash } from '../misc';
 import { EnvironmentVariableProvider } from './environmentVariableProvider';
 import { HttpVariable, HttpVariableProvider } from './httpVariableProvider';
 import { RequestVariableProvider } from './requestVariableProvider';
@@ -16,11 +14,11 @@ export class FileVariableProvider implements HttpVariableProvider {
     private static _instance: FileVariableProvider;
 
     public static get Instance(): FileVariableProvider {
-        if (!FileVariableProvider._instance) {
-            FileVariableProvider._instance = new FileVariableProvider();
+        if (!this._instance) {
+            this._instance = new FileVariableProvider();
         }
 
-        return FileVariableProvider._instance;
+        return this._instance;
     }
 
     private readonly escapee: Map<string, string> = new Map<string, string>([
@@ -35,21 +33,19 @@ export class FileVariableProvider implements HttpVariableProvider {
         EnvironmentVariableProvider.Instance,
     ];
 
-    private readonly cache = new Map<string, FileVariableValue[]>();
-
-    private readonly fileMD5Hash = new Map<string, string>();
+    private readonly fileVariableCache = new DocumentCache<FileVariableValue[]>();
 
     private constructor() {
     }
 
     public readonly type: VariableType = VariableType.File;
 
-    public async has(document: TextDocument, name: string): Promise<boolean> {
+    public async has(name: string, document: TextDocument): Promise<boolean> {
         const variables = await this.getFileVariables(document);
         return variables.some(v => v.name === name);
     }
 
-    public async get(document: TextDocument, name: string): Promise<HttpVariable> {
+    public async get(name: string, document: TextDocument): Promise<HttpVariable> {
         const variables = await this.getFileVariables(document);
         const variable = variables.find(v => v.name === name);
         if (!variable) {
@@ -67,14 +63,16 @@ export class FileVariableProvider implements HttpVariableProvider {
     }
 
     private async getFileVariables(document: TextDocument): Promise<FileVariableValue[]> {
-        const file = document.uri.toString();
+        if (this.fileVariableCache.has(document)) {
+            return this.fileVariableCache.get(document)!;
+        }
+
         const fileContent = document.getText();
-        const fileHash = calculateMD5Hash(fileContent);
-        if (!this.cache.has(file) || fileHash !== this.fileMD5Hash.get(file)) {
-            const regex = new RegExp(Constants.FileVariableDefinitionRegex, 'mg');
-            const variables = new Map<string, FileVariableValue>();
-            let match: RegExpExecArray;
-            while (match = regex.exec(fileContent)) {
+        const variables = new Map<string, FileVariableValue>();
+        for (const line of fileContent.split(Constants.LineSplitterRegex)) {
+            const regex = new RegExp(Constants.FileVariableDefinitionRegex, 'g');
+            let match: RegExpExecArray | null;
+            while (match = regex.exec(line)) {
                 const [, key, originalValue] = match;
                 let value = "";
                 let isPrevCharEscape = false;
@@ -92,24 +90,24 @@ export class FileVariableProvider implements HttpVariableProvider {
                 }
                 variables.set(key, { name: key, value });
             }
-            this.cache.set(file, [...variables.values()]);
-            this.fileMD5Hash.set(file, fileHash);
         }
 
-        return this.cache.get(file);
+        const values = [...variables.values()];
+        this.fileVariableCache.set(document, values);
+        return values;
     }
 
     private async resolveFileVariables(document: TextDocument, variables: FileVariableValue[]): Promise<Map<string, string>> {
         // Resolve non-file variables in variable value
         const fileVariableNames = new Set(variables.map(v => v.name));
         const resolvedVariables = await Promise.all(variables.map(
-            async ({name, value}) => {
+            async ({ name, value }) => {
                 const parsedValue = await this.processNonFileVariableValue(document, value, fileVariableNames);
                 return { name, value: parsedValue };
             }
         ));
 
-        const variableMap = new Map(resolvedVariables.map(({name, value}): [string, string] => [name, value]));
+        const variableMap = new Map(resolvedVariables.map(({ name, value }): [string, string] => [name, value]));
         const dependentVariables = new Map<string, string[]>();
         const dependencyCount = new Map<string, number>();
         const noDependencyVariables: string[] = [];
@@ -121,7 +119,7 @@ export class FileVariableProvider implements HttpVariableProvider {
                 dependencyCount.set(name, dependentVariableNames.size);
                 dependentVariableNames.forEach(dname => {
                     if (dependentVariables.has(dname)) {
-                        dependentVariables.get(dname).push(name);
+                        dependentVariables.get(dname)!.push(name);
                     } else {
                         dependentVariables.set(dname, [name]);
                     }
@@ -132,17 +130,17 @@ export class FileVariableProvider implements HttpVariableProvider {
         // Resolve all dependent file variables to actual value
         while (noDependencyVariables.length !== 0) {
             const current = noDependencyVariables.shift();
-            if (!dependentVariables.has(current)) {
+            if (!dependentVariables.has(current!)) {
                 continue;
             }
-            const dependents = dependentVariables.get(current);
-            dependents.forEach(d => {
+            const dependents = dependentVariables.get(current!);
+            dependents!.forEach(d => {
                 const originalValue = variableMap.get(d);
-                const currentValue = originalValue.replace(
-                    new RegExp(`{{\\s*${current}\s*}}`, 'g'),
-                    variableMap.get(current));
+                const currentValue = originalValue!.replace(
+                    new RegExp(`{{\\s*${current}\\s*}}`, 'g'),
+                    variableMap.get(current!)!);
                 variableMap.set(d, currentValue);
-                const newCount = dependencyCount.get(d) - 1;
+                const newCount = dependencyCount.get(d)! - 1;
                 if (newCount === 0) {
                     noDependencyVariables.push(d);
                     dependencyCount.delete(d);
@@ -158,7 +156,7 @@ export class FileVariableProvider implements HttpVariableProvider {
     private async processNonFileVariableValue(document: TextDocument, value: string, variables: Set<string>): Promise<string> {
         const variableReferenceRegex = /\{{2}(.+?)\}{2}/g;
         let result = '';
-        let match: RegExpExecArray;
+        let match: RegExpExecArray | null;
         let lastIndex = 0;
         variable:
         while (match = variableReferenceRegex.exec(value)) {
@@ -168,8 +166,8 @@ export class FileVariableProvider implements HttpVariableProvider {
             if (!variables.has(name)) {
                 const context = { rawRequest: value, parsedRequest: result };
                 for (const provider of this.innerVariableProviders) {
-                    if (await provider.has(document, name, context)) {
-                        const { value, error, warning } = await provider.get(document, name, context);
+                    if (await provider.has(name, document, context)) {
+                        const { value, error, warning } = await provider.get(name, document, context);
                         if (!error && !warning) {
                             result += value;
                             continue variable;
@@ -188,8 +186,8 @@ export class FileVariableProvider implements HttpVariableProvider {
 
     private resolveDependentFileVariableNames(value: string): string[] {
         const variableReferenceRegex = /\{{2}(.+?)\}{2}/g;
-        let match: RegExpExecArray;
-        const result = [];
+        let match: RegExpExecArray | null;
+        const result: string[] = [];
         while (match = variableReferenceRegex.exec(value)) {
             result.push(match[1].trim());
         }

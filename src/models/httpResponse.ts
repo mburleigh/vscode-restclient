@@ -1,26 +1,29 @@
-"use strict";
-
-import { getHeader } from '../utils/misc';
-import { Headers } from "./base";
+import { getContentType } from '../utils/misc';
+import { ResponseHeaders } from './base';
 import { HttpRequest } from "./httpRequest";
-import { HttpResponseTimingPhases } from './httpResponseTimingPhases';
+
+import got = require('got');
+
+// Make all properties in T nullable
+type Nullable<T> = {
+    [P in keyof T]: T[P] | null;
+};
 
 export class HttpResponse {
     public constructor(
         public statusCode: number,
         public statusMessage: string,
         public httpVersion: string,
-        public headers: Headers,
+        public headers: ResponseHeaders,
         public body: string,
-        public elapsedMillionSeconds: number,
         public bodySizeInBytes: number,
         public headersSizeInBytes: number,
         public bodyBuffer: Buffer,
-        public timingPhases: HttpResponseTimingPhases,
+        public timingPhases: Nullable<got.GotTimingsPhases>,
         public request: HttpRequest) {
     }
 
-    public getHeader(name: string) {
-        return getHeader(this.headers, name);
+    public get contentType(): string | undefined {
+        return getContentType(this.headers);
     }
 }

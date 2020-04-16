@@ -1,22 +1,26 @@
-"use strict";
-
 import { Stream } from 'stream';
-import { getHeader } from '../utils/misc';
-import { Headers } from './base';
-import { RequestVariableCacheKey } from './requestVariableCacheKey';
+import { getContentType } from '../utils/misc';
+import { RequestHeaders } from './base';
 
 export class HttpRequest {
+    public isCancelled: boolean;
     public constructor(
         public method: string,
         public url: string,
-        public headers: Headers,
-        public body: string | Stream,
-        public rawBody: string,
-        public requestVariableCacheKey?: RequestVariableCacheKey) {
+        public headers: RequestHeaders,
+        public body?: string | Stream,
+        public rawBody?: string,
+        public name?: string) {
+            this.method = method.toLocaleUpperCase();
+            this.isCancelled = false;
     }
 
-    public getHeader(name: string) {
-        return getHeader(this.headers, name);
+    public get contentType(): string | undefined {
+        return getContentType(this.headers);
+    }
+
+    public cancel(): void {
+        this.isCancelled = true;
     }
 }
 
@@ -24,8 +28,8 @@ export class SerializedHttpRequest {
     public constructor(
         public method: string,
         public url: string,
-        public headers: Headers,
-        public body: string,
+        public headers: RequestHeaders,
+        public body: string | undefined,
         public startTime: number) {
     }
 

@@ -1,11 +1,8 @@
-'use strict';
-
 import { TextDocument } from "vscode";
-import { RequestVariableCacheValue } from '../../models/requestVariableCacheValue';
+import { HttpResponse } from '../../models/httpResponse';
 import { VariableType } from "../../models/variableType";
 
-
-export type HttpVariableValue = string | {} | RequestVariableCacheValue;
+export type HttpVariableValue = string | {} | HttpResponse;
 
 export interface HttpVariable {
     name: string;
@@ -21,7 +18,7 @@ export interface HttpVariableContext {
 
 export interface HttpVariableProvider {
     readonly type: VariableType;
-    has(document: TextDocument, name: string, context: HttpVariableContext): Promise<boolean>;
-    get(document: TextDocument, name: string, context: HttpVariableContext): Promise<HttpVariable>;
-    getAll(document: TextDocument, context: HttpVariableContext): Promise<HttpVariable[]>;
+    has(name: string, document?: TextDocument, context?: HttpVariableContext): Promise<boolean>;
+    get(name: string, document?: TextDocument, context?: HttpVariableContext): Promise<HttpVariable>;
+    getAll(document?: TextDocument, context?: HttpVariableContext): Promise<HttpVariable[]>;
 }
